@@ -6,7 +6,7 @@ import re
 from typing import Any
 
 
-_NUMBER_PATTERN = re.compile(r"\d+(?:\.\d+)?")
+_NUMBER_PATTERN = re.compile(r"-?\d+(?:\.\d+)?")
 _FILENAME_PATTERN = re.compile(r"\b([A-Za-z0-9_.-]+\.(?:step|stp))\b", re.IGNORECASE)
 
 

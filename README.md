@@ -121,3 +121,52 @@ Intentionally not implemented in Stage 1:
 - No GUI.
 - No Ollama execution.
 - No raw SolidWorks code generation or execution from prompts.
+
+## Stage 2 SolidWorks COM Automation
+
+Stage 2 adds real SolidWorks COM automation behind the existing deterministic CAD functions while preserving Stage 1 dry-run behavior. The parser, schema, validator, and router intent shape remain stable.
+
+Run the app:
+
+```powershell
+python app.py
+```
+
+At startup choose:
+
+```text
+[1] Dry run
+[2] Real SolidWorks
+```
+
+Press Enter for dry-run mode. Dry-run mode does not open SolidWorks and does not make COM calls.
+
+Real SolidWorks mode controls SolidWorks and creates files locally. Use it only on a Windows machine with SolidWorks 2022 installed and licensed.
+
+Example prompts:
+
+- create a 50 mm cube
+- create a block 100 by 60 by 20 mm
+- create cylinder diameter 30 mm height 80 mm
+- export step as cube.step
+
+Expected output files:
+
+- Parts are saved under `outputs/parts/` as `.SLDPRT`.
+- STEP exports are saved under `outputs/exports/` as `.step` or `.stp`.
+- Existing files are not silently overwritten; incremented filenames are generated.
+
+Manual SolidWorks connection check:
+
+```powershell
+python manual_tests/test_solidworks_connection.py
+```
+
+Troubleshooting:
+
+- COM dispatch failure: confirm `pywin32` is installed and SolidWorks can be launched by the current Windows user.
+- SolidWorks not installed: install and license SolidWorks Desktop 2022 before using real mode.
+- SolidWorks not opening: start SolidWorks manually once, accept any first-run prompts, then retry.
+- Template path issue: configure a valid SolidWorks part template path if blank part creation fails.
+- Memory warning: close unused SolidWorks documents and restart SolidWorks before retrying.
+- Permission issue: confirm the project folder and `outputs/` folders are writable.

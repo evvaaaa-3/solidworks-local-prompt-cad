@@ -37,7 +37,7 @@ def _to_jsonable(value: Any) -> Any:
     return value
 
 
-def process_prompt(prompt: str, ask_confirmation: bool = True) -> None:
+def process_prompt(prompt: str, ask_confirmation: bool = True, dry_run: bool = True) -> None:
     try:
         from parser.rule_parser import parse_prompt_rule_based
         from router.tool_router import route_intent
@@ -62,7 +62,7 @@ def process_prompt(prompt: str, ask_confirmation: bool = True) -> None:
                 print("Cancelled.")
                 return
 
-        result = route_intent(validated_intent, dry_run=True)
+        result = route_intent(validated_intent, dry_run=dry_run)
         if result is not None:
             print("Tool result:")
             print(json.dumps(_to_jsonable(result), indent=2))
@@ -79,6 +79,12 @@ def process_prompt(prompt: str, ask_confirmation: bool = True) -> None:
 
 def main() -> None:
     print(WELCOME_MESSAGE)
+    mode = input("Run mode:\n[1] Dry run\n[2] Real SolidWorks\n> ").strip()
+    dry_run = mode != "2"
+    if dry_run:
+        print("Running in dry-run mode. SolidWorks will not be opened.")
+    else:
+        print("Real SolidWorks mode will open/control SolidWorks and create files locally.")
 
     while True:
         try:
@@ -98,7 +104,7 @@ def main() -> None:
             _print_supported_examples()
             continue
 
-        process_prompt(prompt)
+        process_prompt(prompt, dry_run=dry_run)
 
 
 if __name__ == "__main__":
