@@ -16,13 +16,11 @@ class RouterTests(unittest.TestCase):
         result = route_intent(intent, dry_run=True)
 
         self.assertEqual(
-            result,
-            {
-                "status": "dry_run_success",
-                "tool": "create_cube",
-                "parameters": {"side_mm": 50.0},
-            },
+            result["status"],
+            "dry_run_success",
         )
+        self.assertEqual(result["tool"], "create_cube")
+        self.assertEqual(result["dimensions_mm"], {"side_mm": 50.0})
 
     def test_dry_run_route_does_not_call_solidworks(self) -> None:
         intent = validate_intent(
@@ -47,3 +45,92 @@ class RouterTests(unittest.TestCase):
 
         self.assertEqual(result, {"status": "success"})
         create_cube.assert_called_once_with(side_mm=10.0, dry_run=False)
+
+    def test_dry_run_routes_disc(self) -> None:
+        intent = validate_intent(
+            {"tool_name": "create_disc", "parameters": {"diameter_mm": 50, "thickness_mm": 5}}
+        )
+
+        result = route_intent(intent, dry_run=True)
+
+        self.assertEqual(result["tool"], "create_disc")
+        self.assertEqual(result["status"], "dry_run_success")
+
+    def test_dry_run_routes_plate(self) -> None:
+        intent = validate_intent(
+            {
+                "tool_name": "create_plate",
+                "parameters": {"length_mm": 100, "width_mm": 60, "thickness_mm": 5},
+            }
+        )
+
+        result = route_intent(intent, dry_run=True)
+
+        self.assertEqual(result["tool"], "create_plate")
+
+    def test_dry_run_routes_tube(self) -> None:
+        intent = validate_intent(
+            {
+                "tool_name": "create_tube",
+                "parameters": {
+                    "outer_diameter_mm": 50,
+                    "inner_diameter_mm": 30,
+                    "height_mm": 80,
+                },
+            }
+        )
+
+        result = route_intent(intent, dry_run=True)
+
+        self.assertEqual(result["tool"], "create_tube")
+
+    def test_dry_run_routes_plate_with_hole(self) -> None:
+        intent = validate_intent(
+            {
+                "tool_name": "create_plate_with_hole",
+                "parameters": {
+                    "length_mm": 100,
+                    "width_mm": 60,
+                    "thickness_mm": 5,
+                    "hole_diameter_mm": 20,
+                },
+            }
+        )
+
+        result = route_intent(intent, dry_run=True)
+
+        self.assertEqual(result["tool"], "create_plate_with_hole")
+
+    def test_dry_run_routes_cone(self) -> None:
+        intent = validate_intent(
+            {
+                "tool_name": "create_cone",
+                "parameters": {"base_diameter_mm": 50, "height_mm": 80},
+            }
+        )
+
+        result = route_intent(intent, dry_run=True)
+
+        self.assertEqual(result["tool"], "create_cone")
+        self.assertEqual(result["feature_type"], "dry_run")
+
+    def test_dry_run_routes_sphere(self) -> None:
+        intent = validate_intent(
+            {"tool_name": "create_sphere", "parameters": {"diameter_mm": 50}}
+        )
+
+        result = route_intent(intent, dry_run=True)
+
+        self.assertEqual(result["tool"], "create_sphere")
+
+    def test_dry_run_routes_torus(self) -> None:
+        intent = validate_intent(
+            {
+                "tool_name": "create_torus",
+                "parameters": {"major_diameter_mm": 80, "minor_diameter_mm": 20},
+            }
+        )
+
+        result = route_intent(intent, dry_run=True)
+
+        self.assertEqual(result["tool"], "create_torus")

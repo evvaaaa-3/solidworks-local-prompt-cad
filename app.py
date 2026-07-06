@@ -1,4 +1,4 @@
-"""Terminal CLI for the SolidWorks Local Prompt-to-CAD Stage 1 prototype."""
+"""Terminal CLI for the SolidWorks Local Prompt-to-CAD prototype."""
 
 from __future__ import annotations
 
@@ -7,26 +7,57 @@ from typing import Any
 
 
 WELCOME_MESSAGE = """SolidWorks Local Prompt-to-CAD
-Type `help` for examples or `exit` to quit.
+Current mode: DRY-RUN
+Type `help` for commands.
 """
 
 HELP_MESSAGE = """
-Supported examples:
+Mode commands:
+- mode        Show current mode
+- dry         Switch to dry-run mode
+- real        Switch to real SolidWorks mode
+- solidworks  Alias for real mode
+- status      Show current execution status
+- help        Show this help message
+- exit        Quit the app
+- quit        Quit the app
+
+Shape examples:
 - create a 50 mm cube
-- create cube 50 mm
-- make a cube of side 50 mm
 - create a block 100 by 60 by 20 mm
-- create block length 100 width 60 height 20 mm
 - create cylinder diameter 30 mm height 80 mm
-- create a cylinder of diameter 30 mm and height 80 mm
-- export step as test.step
-- export as test.step
-- save step as cube.step
+- create disc diameter 50 mm thickness 5 mm
+- create plate 100 by 60 by 5 mm
+- create tube outer diameter 50 mm inner diameter 30 mm height 80 mm
+- create plate 100 by 60 by 5 mm with hole diameter 20 mm
+- create cone base diameter 50 mm height 80 mm
+- create sphere diameter 50 mm
+- create torus major diameter 80 mm minor diameter 20 mm
+- export step as cube.step
 """
 
 
-def _print_supported_examples() -> None:
+def _mode_label(dry_run: bool) -> str:
+    return "DRY-RUN" if dry_run else "REAL SolidWorks"
+
+
+def _print_help() -> None:
     print(HELP_MESSAGE)
+
+
+def _print_status(dry_run: bool) -> None:
+    print(f"Current mode: {_mode_label(dry_run)}")
+    if dry_run:
+        print("No SolidWorks calls will be made.")
+    else:
+        print("Real mode will open/control SolidWorks and create files locally.")
+
+
+def _confirm_real_mode() -> bool:
+    print("Real SolidWorks mode will open/control SolidWorks and create files locally.")
+    print("Make sure SolidWorks 2022 is installed and preferably already open.")
+    confirmation = input("Switch to real SolidWorks mode? [y/n]: ").strip().lower()
+    return confirmation in {"y", "yes"}
 
 
 def _to_jsonable(value: Any) -> Any:
@@ -57,7 +88,7 @@ def process_prompt(prompt: str, ask_confirmation: bool = True, dry_run: bool = T
         print(validated_intent)
 
         if ask_confirmation:
-            confirmation = input("Proceed? [y/n]: ").strip().lower()
+            confirmation = input(f"Proceed in {_mode_label(dry_run)} mode? [y/n]: ").strip().lower()
             if confirmation not in {"y", "yes"}:
                 print("Cancelled.")
                 return
@@ -72,19 +103,47 @@ def process_prompt(prompt: str, ask_confirmation: bool = True, dry_run: bool = T
             print(f"Detail: {exc}")
     except ValueError as exc:
         print(f"Input error: {exc}")
-        _print_supported_examples()
+        _print_help()
     except Exception as exc:
         print(f"Unexpected error: {exc}")
 
 
+def handle_command(command: str, dry_run: bool) -> tuple[bool, bool]:
+    normalized = command.strip().lower()
+
+    if normalized in {"exit", "quit"}:
+        print("Goodbye.")
+        return dry_run, True
+
+    if normalized == "help":
+        _print_help()
+        return dry_run, False
+
+    if normalized == "mode":
+        print(f"Current mode: {_mode_label(dry_run)}")
+        return dry_run, False
+
+    if normalized == "status":
+        _print_status(dry_run)
+        return dry_run, False
+
+    if normalized == "dry":
+        print("Switched to DRY-RUN mode. No SolidWorks calls will be made.")
+        return True, False
+
+    if normalized in {"real", "solidworks"}:
+        if _confirm_real_mode():
+            print("Switched to REAL SolidWorks mode.")
+            return False, False
+        print(f"Stayed in {_mode_label(dry_run)} mode.")
+        return dry_run, False
+
+    return dry_run, False
+
+
 def main() -> None:
     print(WELCOME_MESSAGE)
-    mode = input("Run mode:\n[1] Dry run\n[2] Real SolidWorks\n> ").strip()
-    dry_run = mode != "2"
-    if dry_run:
-        print("Running in dry-run mode. SolidWorks will not be opened.")
-    else:
-        print("Real SolidWorks mode will open/control SolidWorks and create files locally.")
+    dry_run = True
 
     while True:
         try:
@@ -96,12 +155,19 @@ def main() -> None:
         if not prompt:
             continue
 
-        if prompt.lower() in {"exit", "quit"}:
-            print("Goodbye.")
-            break
-
-        if prompt.lower() == "help":
-            _print_supported_examples()
+        if prompt.lower() in {
+            "mode",
+            "dry",
+            "real",
+            "solidworks",
+            "status",
+            "help",
+            "exit",
+            "quit",
+        }:
+            dry_run, should_exit = handle_command(prompt, dry_run)
+            if should_exit:
+                break
             continue
 
         process_prompt(prompt, dry_run=dry_run)

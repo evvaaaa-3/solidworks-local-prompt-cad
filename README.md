@@ -170,3 +170,144 @@ Troubleshooting:
 - Template path issue: configure a valid SolidWorks part template path if blank part creation fails.
 - Memory warning: close unused SolidWorks documents and restart SolidWorks before retrying.
 - Permission issue: confirm the project folder and `outputs/` folders are writable.
+
+## Stage 2A Extruded Primitive Expansion
+
+Stage 2A completes the parser-validator-router-CAD path for extrusion-based primitives while preserving dry-run mode and keeping normal tests independent of SolidWorks.
+
+Supported tools:
+
+- `create_cube`
+- `create_block`
+- `create_cylinder`
+- `create_disc`
+- `create_plate`
+- `create_tube`
+- `create_plate_with_hole`
+- `export_step`
+
+Dry-run testing:
+
+```powershell
+python app.py
+# starts in DRY-RUN mode
+python -m pytest
+```
+
+Real SolidWorks testing:
+
+```powershell
+python app.py
+# type: real
+# confirm the warning prompt
+```
+
+The CLI supports runtime mode switching during the same session:
+
+- `mode` shows the current mode.
+- `dry` switches immediately to dry-run mode.
+- `real` switches to real SolidWorks mode after confirmation.
+- `solidworks` is an alias for `real`.
+- `status` shows whether SolidWorks will be controlled.
+
+Manual real-mode scripts:
+
+```powershell
+python manual_tests/test_solidworks_connection.py
+python manual_tests/test_front_plane_selection.py
+python manual_tests/test_create_cube_real.py
+python manual_tests/test_create_block_real.py
+python manual_tests/test_create_cylinder_real.py
+python manual_tests/test_create_extruded_primitives_real.py
+```
+
+Example prompts:
+
+- create a 50 mm cube
+- create a block 100 by 60 by 20 mm
+- create cylinder diameter 30 mm height 80 mm
+- create disc diameter 50 mm thickness 5 mm
+- create plate 100 by 60 by 5 mm
+- create tube outer diameter 50 mm inner diameter 30 mm height 80 mm
+- create plate 100 by 60 by 5 mm with hole diameter 20 mm
+- export step as cube.step
+
+Expected output files:
+
+- `.SLDPRT` files are saved under `outputs/parts/`.
+- `.step` and `.stp` files are saved under `outputs/exports/`.
+- Existing files are not silently overwritten; incremented filenames are generated.
+
+Screenshot checklist for reports:
+
+- CLI run mode selection.
+- Parsed intent and validated intent.
+- SolidWorks Part document after sketch creation.
+- Final extruded model.
+- Saved file visible under `outputs/parts/`.
+
+Known limitations:
+
+- No cone, sphere, torus, revolve, sweep, or loft tools yet.
+- No assemblies yet.
+- No bolts, nuts, bearings, or gears yet.
+- No Ollama parser yet.
+- No MCP wrapper yet.
+
+Next stage:
+
+- Add the local Ollama JSON-intent parser after Stage 2A is stable.
+
+## Stage 2B: Revolve-Based Primitives
+
+Stage 2B adds revolve-based primitive workflows to the existing local parser-validator-router-CAD pipeline. Cone, sphere, and torus prompts now route through deterministic CAD functions with dry-run and real SolidWorks modes.
+
+Supported revolve tools:
+
+- `create_cone`
+- `create_sphere`
+- `create_torus`
+
+The real SolidWorks workflow creates a sketch on the Front Plane, draws a centerline revolve axis, draws the profile geometry, exits sketch mode, and creates a 360-degree boss revolve. User dimensions remain in millimeters and are converted to meters internally for SolidWorks API calls.
+
+Example prompts:
+
+- create cone base diameter 50 mm height 80 mm
+- create a cone with base diameter 50 mm and height 80 mm
+- make cone diameter 50 mm height 80 mm
+- create sphere diameter 50 mm
+- create a sphere of diameter 50 mm
+- make a ball of diameter 50 mm
+- create torus major diameter 80 mm minor diameter 20 mm
+- create a torus with major diameter 80 mm and tube diameter 20 mm
+
+Real-mode tests:
+
+```powershell
+python manual_tests/test_create_cone_real.py
+python manual_tests/test_create_sphere_real.py
+python manual_tests/test_create_torus_real.py
+```
+
+Normal automated tests should not open SolidWorks:
+
+```powershell
+python -m pytest
+```
+
+Known limitations:
+
+- Torus revolve may be experimental if SolidWorks COM contour or revolve-axis behavior varies by session.
+- No sweep, loft, or advanced surface features yet.
+- No assemblies yet.
+- No Ollama parser yet.
+- No MCP wrapper yet.
+
+Screenshot checklist:
+
+- Cone terminal success.
+- Cone visible in SolidWorks.
+- Sphere terminal success.
+- Sphere visible in SolidWorks.
+- Torus result or failure diagnostic.
+- Generated files visible in `outputs/parts/`.

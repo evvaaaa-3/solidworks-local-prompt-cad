@@ -69,6 +69,110 @@ class RuleParserTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_intent(intent)
 
+    def test_disc_prompt_parses_correctly(self) -> None:
+        intent = parse_prompt_rule_based("create disc diameter 50 mm thickness 5 mm")
+
+        self.assertEqual(
+            intent,
+            {
+                "tool_name": "create_disc",
+                "parameters": {"diameter_mm": 50.0, "thickness_mm": 5.0},
+            },
+        )
+
+    def test_plate_prompt_parses_correctly(self) -> None:
+        intent = parse_prompt_rule_based("create plate 100 by 60 by 5 mm")
+
+        self.assertEqual(
+            intent,
+            {
+                "tool_name": "create_plate",
+                "parameters": {
+                    "length_mm": 100.0,
+                    "width_mm": 60.0,
+                    "thickness_mm": 5.0,
+                },
+            },
+        )
+
+    def test_tube_prompt_parses_correctly(self) -> None:
+        intent = parse_prompt_rule_based(
+            "create tube outer diameter 50 mm inner diameter 30 mm height 80 mm"
+        )
+
+        self.assertEqual(
+            intent,
+            {
+                "tool_name": "create_tube",
+                "parameters": {
+                    "outer_diameter_mm": 50.0,
+                    "inner_diameter_mm": 30.0,
+                    "height_mm": 80.0,
+                },
+            },
+        )
+
+    def test_hollow_cylinder_prompt_parses_as_tube(self) -> None:
+        intent = parse_prompt_rule_based(
+            "create hollow cylinder outer diameter 50 mm inner diameter 30 mm height 80 mm"
+        )
+
+        self.assertEqual(intent["tool_name"], "create_tube")
+        self.assertEqual(intent["parameters"]["outer_diameter_mm"], 50.0)
+
+    def test_plate_with_hole_prompt_parses_correctly(self) -> None:
+        intent = parse_prompt_rule_based(
+            "create plate 100 by 60 by 5 mm with hole diameter 20 mm"
+        )
+
+        self.assertEqual(
+            intent,
+            {
+                "tool_name": "create_plate_with_hole",
+                "parameters": {
+                    "length_mm": 100.0,
+                    "width_mm": 60.0,
+                    "thickness_mm": 5.0,
+                    "hole_diameter_mm": 20.0,
+                },
+            },
+        )
+
+    def test_cone_prompt_parses_correctly(self) -> None:
+        intent = parse_prompt_rule_based("create cone base diameter 50 mm height 80 mm")
+
+        self.assertEqual(
+            intent,
+            {
+                "tool_name": "create_cone",
+                "parameters": {"base_diameter_mm": 50.0, "height_mm": 80.0},
+            },
+        )
+
+    def test_sphere_prompt_parses_correctly(self) -> None:
+        intent = parse_prompt_rule_based("make a ball of diameter 50 mm")
+
+        self.assertEqual(
+            intent,
+            {
+                "tool_name": "create_sphere",
+                "parameters": {"diameter_mm": 50.0},
+            },
+        )
+
+    def test_torus_prompt_parses_correctly(self) -> None:
+        intent = parse_prompt_rule_based(
+            "create torus major diameter 80 mm minor diameter 20 mm"
+        )
+
+        self.assertEqual(
+            intent,
+            {
+                "tool_name": "create_torus",
+                "parameters": {"major_diameter_mm": 80.0, "minor_diameter_mm": 20.0},
+            },
+        )
+
     def test_negative_block_dimension_is_rejected_by_validator(self) -> None:
         intent = parse_prompt_rule_based("create a block 100 by -60 by 20 mm")
 

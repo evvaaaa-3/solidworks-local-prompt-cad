@@ -22,7 +22,7 @@ def _first_number(prompt: str, field_name: str) -> float:
 
 
 def _dimension_after(label: str, prompt: str) -> float | None:
-    match = re.search(rf"\b{label}\b\s*(?:of\s*)?({_NUMBER_PATTERN.pattern})", prompt)
+    match = re.search(rf"\b{re.escape(label)}\b\s*(?:of\s*)?({_NUMBER_PATTERN.pattern})", prompt)
     if match is None:
         return None
     return float(match.group(1))
@@ -57,6 +57,143 @@ def parse_prompt_rule_based(prompt: str) -> dict[str, Any]:
         return {
             "tool_name": "export_step",
             "parameters": {"filename": filename},
+        }
+
+    if "torus" in normalized:
+        major_diameter = _dimension_after("major diameter", normalized)
+        minor_diameter = _dimension_after("minor diameter", normalized)
+        tube_diameter = _dimension_after("tube diameter", normalized)
+
+        if minor_diameter is None:
+            minor_diameter = tube_diameter
+
+        if major_diameter is None or minor_diameter is None:
+            raise ValueError("Torus prompts need major diameter and minor/tube diameter.")
+
+        return {
+            "tool_name": "create_torus",
+            "parameters": {
+                "major_diameter_mm": major_diameter,
+                "minor_diameter_mm": minor_diameter,
+            },
+        }
+
+    if "sphere" in normalized or "ball" in normalized:
+        diameter = _dimension_after("diameter", normalized)
+        if diameter is None:
+            diameter = _first_number(normalized, "sphere diameter")
+
+        return {
+            "tool_name": "create_sphere",
+            "parameters": {"diameter_mm": diameter},
+        }
+
+    if "cone" in normalized:
+        base_diameter = _dimension_after("base diameter", normalized)
+        diameter = _dimension_after("diameter", normalized)
+        height = _dimension_after("height", normalized)
+
+        if base_diameter is None:
+            base_diameter = diameter
+
+        if base_diameter is None or height is None:
+            values = _numbers(normalized)
+            if len(values) < 2:
+                raise ValueError("Cone prompts need base diameter and height dimensions.")
+            base_diameter, height = values[:2]
+
+        return {
+            "tool_name": "create_cone",
+            "parameters": {
+                "base_diameter_mm": base_diameter,
+                "height_mm": height,
+            },
+        }
+
+    if "tube" in normalized or "hollow cylinder" in normalized:
+        outer_diameter = _dimension_after("outer diameter", normalized)
+        inner_diameter = _dimension_after("inner diameter", normalized)
+        height = _dimension_after("height", normalized)
+
+        if outer_diameter is None or inner_diameter is None or height is None:
+            raise ValueError(
+                "Tube prompts need outer diameter, inner diameter, and height dimensions."
+            )
+
+        return {
+            "tool_name": "create_tube",
+            "parameters": {
+                "outer_diameter_mm": outer_diameter,
+                "inner_diameter_mm": inner_diameter,
+                "height_mm": height,
+            },
+        }
+
+    if "plate" in normalized and "hole" in normalized:
+        length = _dimension_after("length", normalized)
+        width = _dimension_after("width", normalized)
+        thickness = _dimension_after("thickness", normalized)
+        hole_diameter = _dimension_after("hole diameter", normalized)
+
+        values = _numbers(normalized)
+        if length is None or width is None or thickness is None:
+            if len(values) < 3:
+                raise ValueError(
+                    "Plate with hole prompts need length, width, thickness, and hole diameter."
+                )
+            length, width, thickness = values[:3]
+
+        if hole_diameter is None:
+            if len(values) < 4:
+                raise ValueError("Plate with hole prompts need a hole diameter.")
+            hole_diameter = values[-1]
+
+        return {
+            "tool_name": "create_plate_with_hole",
+            "parameters": {
+                "length_mm": length,
+                "width_mm": width,
+                "thickness_mm": thickness,
+                "hole_diameter_mm": hole_diameter,
+            },
+        }
+
+    if "disc" in normalized or "disk" in normalized:
+        diameter = _dimension_after("diameter", normalized)
+        thickness = _dimension_after("thickness", normalized)
+
+        if diameter is None or thickness is None:
+            values = _numbers(normalized)
+            if len(values) < 2:
+                raise ValueError("Disc prompts need diameter and thickness dimensions.")
+            diameter, thickness = values[:2]
+
+        return {
+            "tool_name": "create_disc",
+            "parameters": {
+                "diameter_mm": diameter,
+                "thickness_mm": thickness,
+            },
+        }
+
+    if "plate" in normalized:
+        length = _dimension_after("length", normalized)
+        width = _dimension_after("width", normalized)
+        thickness = _dimension_after("thickness", normalized)
+
+        if length is None or width is None or thickness is None:
+            values = _numbers(normalized)
+            if len(values) < 3:
+                raise ValueError("Plate prompts need length, width, and thickness dimensions.")
+            length, width, thickness = values[:3]
+
+        return {
+            "tool_name": "create_plate",
+            "parameters": {
+                "length_mm": length,
+                "width_mm": width,
+                "thickness_mm": thickness,
+            },
         }
 
     if "cube" in normalized:

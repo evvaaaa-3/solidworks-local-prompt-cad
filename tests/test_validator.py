@@ -36,3 +36,103 @@ class ValidatorTests(unittest.TestCase):
             validate_intent(
                 {"tool_name": "export_step", "parameters": {"filename": "cube.txt"}}
             )
+
+    def test_valid_disc_passes(self) -> None:
+        validated = validate_intent(
+            {
+                "tool_name": "create_disc",
+                "parameters": {"diameter_mm": 50, "thickness_mm": 5},
+            }
+        )
+
+        self.assertEqual(validated.tool_name, "create_disc")
+
+    def test_valid_plate_passes(self) -> None:
+        validated = validate_intent(
+            {
+                "tool_name": "create_plate",
+                "parameters": {"length_mm": 100, "width_mm": 60, "thickness_mm": 5},
+            }
+        )
+
+        self.assertEqual(validated.tool_name, "create_plate")
+
+    def test_valid_tube_passes(self) -> None:
+        validated = validate_intent(
+            {
+                "tool_name": "create_tube",
+                "parameters": {
+                    "outer_diameter_mm": 50,
+                    "inner_diameter_mm": 30,
+                    "height_mm": 80,
+                },
+            }
+        )
+
+        self.assertEqual(validated.tool_name, "create_tube")
+
+    def test_invalid_tube_inner_greater_than_outer_fails(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_intent(
+                {
+                    "tool_name": "create_tube",
+                    "parameters": {
+                        "outer_diameter_mm": 30,
+                        "inner_diameter_mm": 30,
+                        "height_mm": 80,
+                    },
+                }
+            )
+
+    def test_valid_plate_with_hole_passes(self) -> None:
+        validated = validate_intent(
+            {
+                "tool_name": "create_plate_with_hole",
+                "parameters": {
+                    "length_mm": 100,
+                    "width_mm": 60,
+                    "thickness_mm": 5,
+                    "hole_diameter_mm": 20,
+                },
+            }
+        )
+
+        self.assertEqual(validated.tool_name, "create_plate_with_hole")
+
+    def test_invalid_plate_with_hole_too_large_fails(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_intent(
+                {
+                    "tool_name": "create_plate_with_hole",
+                    "parameters": {
+                        "length_mm": 100,
+                        "width_mm": 60,
+                        "thickness_mm": 5,
+                        "hole_diameter_mm": 60,
+                    },
+                }
+            )
+
+    def test_negative_cone_dimension_fails(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_intent(
+                {
+                    "tool_name": "create_cone",
+                    "parameters": {"base_diameter_mm": -50, "height_mm": 80},
+                }
+            )
+
+    def test_negative_sphere_diameter_fails(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_intent(
+                {"tool_name": "create_sphere", "parameters": {"diameter_mm": -50}}
+            )
+
+    def test_invalid_torus_geometry_fails(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_intent(
+                {
+                    "tool_name": "create_torus",
+                    "parameters": {"major_diameter_mm": 20, "minor_diameter_mm": 20},
+                }
+            )
