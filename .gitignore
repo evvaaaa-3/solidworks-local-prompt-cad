@@ -36,3 +36,9 @@ outputs/exports/*
 
 # Logs
 *.log
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env.local
+__pycache__/
+*.pyc
