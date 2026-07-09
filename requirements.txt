@@ -6,3 +6,4 @@ pytest
 fastapi
 uvicorn[standard]
 httpx
+customtkinter

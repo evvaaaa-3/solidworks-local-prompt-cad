@@ -311,3 +311,37 @@ Screenshot checklist:
 - Sphere visible in SolidWorks.
 - Torus result or failure diagnostic.
 - Generated files visible in `outputs/parts/`.
+
+## Stage 4A: MCP SolidWorks Desktop Popup
+
+Stage 4A adds a native Windows desktop popup for end users working beside SolidWorks. The popup uses the existing local Python pipeline directly: prompt interpretation, validation, routing, CAD tools, SolidWorks COM automation, and local output files. It does not require the FastAPI development server to be running.
+
+Run the desktop popup:
+
+```powershell
+.\venv\Scripts\Activate.ps1
+python -m desktop_ui.app
+```
+
+Install or update dependencies first:
+
+```powershell
+pip install -r requirements.txt
+```
+
+Future Ollama integration will happen behind the prompt interpretation function: a local Ollama parser can be tried first for more flexible natural-language interpretation, then fall back to the existing deterministic rule parser.
+
+## Default Output Location
+
+Generated CAD files are saved by default in the current Windows user's Documents folder:
+
+```text
+Documents\MCP SolidWorks\Outputs\Parts
+Documents\MCP SolidWorks\Outputs\Exports
+```
+
+The application creates these folders automatically. Advanced users and tests can override the output root with:
+
+```powershell
+$env:MCP_SOLIDWORKS_OUTPUT_ROOT = "D:\Some\Other\Output\Folder"
+```

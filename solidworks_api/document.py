@@ -170,4 +170,10 @@ def save_part(model: Any, filepath: str) -> dict[str, str]:
     if not success:
         raise RuntimeError(f"SolidWorks reported failure while saving part to {target}.")
 
+    if not target.exists():
+        raise RuntimeError(
+            "The model was created in SolidWorks, but the file was not saved successfully. "
+            "Please check the output folder or try saving manually."
+        )
+
     return {"status": "success", "filepath": str(target)}

@@ -10,9 +10,14 @@ from pathlib import Path
 from typing import Any
 
 from api.solidworks_lock import solidworks_operation_lock
-from config import EXPORTS_DIR, PARTS_DIR
 from parser.rule_parser import parse_prompt_rule_based
 from router.tool_router import route_intent
+from utils.output_paths import (
+    ensure_output_dirs,
+    get_exports_output_dir,
+    get_parts_output_dir,
+    is_safe_output_path,
+)
 from validator.validate_intent import validate_intent
 
 
@@ -101,8 +106,11 @@ def execute_prompt(prompt: str, mode: str, confirmed: bool) -> dict[str, Any]:
 
 def list_outputs() -> list[dict[str, Any]]:
     files: list[dict[str, Any]] = []
-    for category, directory in (("parts", PARTS_DIR), ("exports", EXPORTS_DIR)):
-        directory.mkdir(parents=True, exist_ok=True)
+    ensure_output_dirs()
+    for category, directory in (
+        ("parts", get_parts_output_dir()),
+        ("exports", get_exports_output_dir()),
+    ):
         for path in directory.iterdir():
             if not path.is_file() or path.name == ".gitkeep":
                 continue
@@ -119,14 +127,15 @@ def list_outputs() -> list[dict[str, Any]]:
 
 
 def resolve_output_file(category: str, filename: str) -> Path:
-    directories = {"parts": PARTS_DIR, "exports": EXPORTS_DIR}
+    ensure_output_dirs()
+    directories = {"parts": get_parts_output_dir(), "exports": get_exports_output_dir()}
     if category not in directories:
         raise ApiServiceError("Unknown output category.", 404)
     if not filename or Path(filename).name != filename or filename in {".", ".."}:
         raise ApiServiceError("Invalid output filename.", 400)
     root = directories[category].resolve()
     candidate = (root / filename).resolve()
-    if candidate.parent != root:
+    if candidate.parent != root or not is_safe_output_path(candidate):
         raise ApiServiceError("Output path is outside the allowed folder.", 403)
     if not candidate.is_file():
         raise ApiServiceError("Output file not found.", 404)

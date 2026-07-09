@@ -5,11 +5,17 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from utils.output_paths import (
+    get_exports_output_dir,
+    get_parts_output_dir,
+    get_user_output_root,
+)
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-OUTPUTS_DIR = PROJECT_ROOT / "outputs"
-PARTS_DIR = OUTPUTS_DIR / "parts"
-EXPORTS_DIR = OUTPUTS_DIR / "exports"
+OUTPUTS_DIR = get_user_output_root()
+PARTS_DIR = get_parts_output_dir()
+EXPORTS_DIR = get_exports_output_dir()
 
 BASE_DIR = PROJECT_ROOT
 OUTPUT_DIR = OUTPUTS_DIR
@@ -49,7 +55,3 @@ def ensure_unique_filepath(filepath: str | Path) -> Path:
         if not candidate.exists():
             return candidate
         counter += 1
-
-
-for directory in (OUTPUTS_DIR, PARTS_DIR, EXPORTS_DIR):
-    directory.mkdir(parents=True, exist_ok=True)
