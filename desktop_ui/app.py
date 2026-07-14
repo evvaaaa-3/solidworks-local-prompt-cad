@@ -547,11 +547,20 @@ class MpcSolidWorksApp(_UI_BASE):
         ):
             if self.last_output_path.suffix.lower() == ".sldasm":
                 self.result_title.set("Assembly created successfully")
+                component_count = len(result.get("instances", []))
+                applied_count = len(result.get("constraints_applied", []))
+                planned_count = len(result.get("constraints_planned", []))
+                self.result_detail.set(
+                    f"File: {self.last_output_path.name}\n"
+                    f"Location: {self.last_output_path.parent}\n"
+                    f"Components inserted: {component_count}\n"
+                    f"Constraints planned/applied: {planned_count}/{applied_count}"
+                )
             else:
                 self.result_title.set("Model created successfully")
-            self.result_detail.set(
-                f"File: {self.last_output_path.name}\nLocation: {self.last_output_path.parent}"
-            )
+                self.result_detail.set(
+                    f"File: {self.last_output_path.name}\nLocation: {self.last_output_path.parent}"
+                )
             self.show_file_button.configure(state="normal")
         else:
             self.result_title.set(

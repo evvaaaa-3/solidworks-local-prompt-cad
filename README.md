@@ -382,3 +382,22 @@ Current limitations:
 - Component orientation can depend on SolidWorks templates and the existing primitive orientation.
 - The rule parser supports only the listed assembly templates in this stage.
 - Unit tests do not open SolidWorks; real assembly verification is manual.
+
+## Generic Assembly Planning Architecture
+
+Stage 5B refactors assembly creation into a reusable planning architecture. The project is no longer only a fixed-template generator: the existing templates are now examples of a generic component, feature, instance, and constraint plan.
+
+Core planning objects:
+
+- `ComponentSpec`: describes a reusable part such as a plate, tube, disc, shaft, wheel, cylinder, pin, or plate with hole.
+- `FeatureSpec`: describes part-level features such as holes and through-holes.
+- `ComponentInstanceSpec`: describes a placed instance of a component in the assembly.
+- `ConstraintSpec`: describes intended relationships such as fixed, coincident, concentric, distance, parallel, or coordinate placement.
+- `AssemblyPlan`: contains all components, instances, constraints, output filename, and metadata for one assembly.
+
+Execution layers:
+
+- Component factory: translates `ComponentSpec` objects into existing primitive part creation calls.
+- Generic executor: creates/reuses component parts, opens a SolidWorks assembly, inserts instances, applies available constraints, uses coordinate placement fallback where needed, and saves a verified `.SLDASM`.
+
+Current behavior uses coordinate placement as the reliable fallback while preserving planned mate constraints in the result object. Future mate execution can improve the executor without changing parser prompts or the high-level assembly plan structure.
