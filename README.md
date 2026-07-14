@@ -345,3 +345,40 @@ The application creates these folders automatically. Advanced users and tests ca
 ```powershell
 $env:MCP_SOLIDWORKS_OUTPUT_ROOT = "D:\Some\Other\Output\Folder"
 ```
+
+## Assembly Creation
+
+Stage 5A adds deterministic assembly creation through the same local parser, validator, router, CAD tools, and SolidWorks COM layers. No Ollama or external AI is required for assembly support.
+
+Supported assembly templates:
+
+- `base_plate_with_cylinders`: base plate with two cylindrical posts.
+- `tube_with_two_end_discs`: tube with two circular end caps.
+- `simple_shaft_with_two_wheels`: shaft with two wheels near the ends.
+
+Example prompts:
+
+```text
+Create an assembly with a base plate and two cylinders
+Create an assembly with a tube and two end discs
+Create an assembly with a shaft and two wheels
+```
+
+Assembly files are saved to:
+
+```text
+Documents\MCP SolidWorks\Outputs\Assemblies
+```
+
+Component parts are saved to:
+
+```text
+Documents\MCP SolidWorks\Outputs\Parts
+```
+
+Current limitations:
+
+- Assembly creation uses deterministic coordinates rather than advanced SolidWorks mates.
+- Component orientation can depend on SolidWorks templates and the existing primitive orientation.
+- The rule parser supports only the listed assembly templates in this stage.
+- Unit tests do not open SolidWorks; real assembly verification is manual.

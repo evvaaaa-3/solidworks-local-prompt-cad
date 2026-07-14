@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from cad_tools.assemblies import create_assembly
 from cad_tools.exports import export_step
 from cad_tools.primitives import (
     create_block,
@@ -103,5 +104,12 @@ def _call_tool(tool_name: str, parameters: dict[str, Any], dry_run: bool) -> dic
 
     if tool_name == "export_step":
         return export_step(filename=parameters["filename"], dry_run=dry_run)
+
+    if tool_name == "create_assembly":
+        return create_assembly(
+            assembly_type=parameters["assembly_type"],
+            parameters=parameters,
+            dry_run=dry_run,
+        )
 
     raise ValueError(f"Unsupported tool: {tool_name}")

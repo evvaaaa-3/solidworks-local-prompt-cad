@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from utils.output_paths import (
+    get_assemblies_output_dir,
     get_exports_output_dir,
     get_parts_output_dir,
     get_user_output_root,
@@ -16,6 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 OUTPUTS_DIR = get_user_output_root()
 PARTS_DIR = get_parts_output_dir()
 EXPORTS_DIR = get_exports_output_dir()
+ASSEMBLIES_DIR = get_assemblies_output_dir()
 
 BASE_DIR = PROJECT_ROOT
 OUTPUT_DIR = OUTPUTS_DIR

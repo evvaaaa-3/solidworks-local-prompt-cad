@@ -24,13 +24,18 @@ def get_exports_output_dir() -> Path:
     return get_user_output_root() / "Exports"
 
 
-def ensure_output_dirs() -> tuple[Path, Path, Path]:
+def get_assemblies_output_dir() -> Path:
+    return get_user_output_root() / "Assemblies"
+
+
+def ensure_output_dirs() -> tuple[Path, Path, Path, Path]:
     root = get_user_output_root()
     parts = get_parts_output_dir()
     exports = get_exports_output_dir()
-    for directory in (root, parts, exports):
+    assemblies = get_assemblies_output_dir()
+    for directory in (root, parts, exports, assemblies):
         directory.mkdir(parents=True, exist_ok=True)
-    return root, parts, exports
+    return root, parts, exports, assemblies
 
 
 def is_safe_output_path(path: str | Path) -> bool:

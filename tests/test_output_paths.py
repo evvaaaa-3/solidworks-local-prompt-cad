@@ -6,10 +6,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from solidworks_api.document import save_part
+from solidworks_api.assembly import save_assembly
 from solidworks_api.export import export_step
 from utils.output_paths import (
     OUTPUT_ROOT_ENV_VAR,
     ensure_output_dirs,
+    get_assemblies_output_dir,
     get_exports_output_dir,
     get_parts_output_dir,
     get_user_output_root,
@@ -38,21 +40,30 @@ class OutputPathTests(unittest.TestCase):
             with patch.dict("os.environ", {OUTPUT_ROOT_ENV_VAR: temp_dir}, clear=False):
                 self.assertEqual(get_user_output_root(), Path(temp_dir).resolve())
 
-    def test_ensure_output_dirs_creates_parts_and_exports(self) -> None:
+    def test_ensure_output_dirs_creates_parts_exports_and_assemblies(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             with patch.dict("os.environ", {OUTPUT_ROOT_ENV_VAR: temp_dir}, clear=False):
-                root, parts, exports = ensure_output_dirs()
+                root, parts, exports, assemblies = ensure_output_dirs()
 
                 self.assertTrue(root.is_dir())
                 self.assertTrue(parts.is_dir())
                 self.assertTrue(exports.is_dir())
+                self.assertTrue(assemblies.is_dir())
                 self.assertEqual(parts, get_parts_output_dir())
                 self.assertEqual(exports, get_exports_output_dir())
+                self.assertEqual(assemblies, get_assemblies_output_dir())
 
     def test_safe_output_path_accepts_files_inside_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             with patch.dict("os.environ", {OUTPUT_ROOT_ENV_VAR: temp_dir}, clear=False):
                 inside = get_parts_output_dir() / "sphere.SLDPRT"
+
+                self.assertTrue(is_safe_output_path(inside))
+
+    def test_safe_output_path_accepts_files_inside_assemblies(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.dict("os.environ", {OUTPUT_ROOT_ENV_VAR: temp_dir}, clear=False):
+                inside = get_assemblies_output_dir() / "assembly.SLDASM"
 
                 self.assertTrue(is_safe_output_path(inside))
 
@@ -88,6 +99,16 @@ class OutputPathTests(unittest.TestCase):
 
             with self.assertRaisesRegex(RuntimeError, "file was not saved successfully"):
                 export_step(FakeSaveModel(write_file=False), str(target))
+
+    def test_save_assembly_uses_unique_filename(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            existing = Path(temp_dir) / "base_plate_with_cylinders.SLDASM"
+            existing.write_text("already here", encoding="utf-8")
+
+            result = save_assembly(FakeSaveModel(write_file=True), str(existing))
+
+            self.assertEqual(Path(result["filepath"]).name, "base_plate_with_cylinders_1.SLDASM")
+            self.assertTrue(Path(result["filepath"]).exists())
 
 
 if __name__ == "__main__":

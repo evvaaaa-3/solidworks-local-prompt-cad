@@ -134,3 +134,21 @@ class RouterTests(unittest.TestCase):
         result = route_intent(intent, dry_run=True)
 
         self.assertEqual(result["tool"], "create_torus")
+
+    def test_router_routes_create_assembly(self) -> None:
+        intent = validate_intent(
+            {
+                "tool_name": "create_assembly",
+                "parameters": {"assembly_type": "base_plate_with_cylinders"},
+            }
+        )
+
+        with patch("router.tool_router.create_assembly") as create_assembly:
+            create_assembly.return_value = {"success": True, "operation": "create_assembly"}
+            result = route_intent(intent, dry_run=False)
+
+        self.assertEqual(result, {"success": True, "operation": "create_assembly"})
+        create_assembly.assert_called_once()
+        _, kwargs = create_assembly.call_args
+        self.assertEqual(kwargs["assembly_type"], "base_plate_with_cylinders")
+        self.assertFalse(kwargs["dry_run"])

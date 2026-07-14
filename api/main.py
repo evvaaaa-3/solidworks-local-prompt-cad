@@ -11,7 +11,12 @@ from api.services import (
     SUPPORTED_TOOLS, ApiServiceError, execute_prompt, list_outputs,
     parse_prompt, resolve_output_file,
 )
-from utils.output_paths import get_exports_output_dir, get_parts_output_dir, get_user_output_root
+from utils.output_paths import (
+    get_assemblies_output_dir,
+    get_exports_output_dir,
+    get_parts_output_dir,
+    get_user_output_root,
+)
 
 
 app = FastAPI(title="Prompt-to-CAD API", version="1.0.0")
@@ -38,6 +43,7 @@ def status() -> dict[str, object]:
         "output_root_dir": str(get_user_output_root()),
         "output_parts_dir": str(get_parts_output_dir()),
         "output_exports_dir": str(get_exports_output_dir()),
+        "output_assemblies_dir": str(get_assemblies_output_dir()),
         "supported_tools": SUPPORTED_TOOLS,
     }
 

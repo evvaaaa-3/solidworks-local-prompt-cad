@@ -125,6 +125,45 @@ class ExportStepParameters(BaseModel):
         return filename
 
 
+AssemblyType = Literal[
+    "base_plate_with_cylinders",
+    "tube_with_two_end_discs",
+    "simple_shaft_with_two_wheels",
+]
+
+
+class AssemblyParameters(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    assembly_type: AssemblyType
+
+    base_length_mm: PositiveMillimeters = 120.0
+    base_width_mm: PositiveMillimeters = 80.0
+    base_thickness_mm: PositiveMillimeters = 8.0
+    post_diameter_mm: PositiveMillimeters = 20.0
+    post_height_mm: PositiveMillimeters = 40.0
+    post_count: Annotated[int, Field(ge=1, le=8)] = 2
+
+    tube_outer_diameter_mm: PositiveMillimeters = 50.0
+    tube_inner_diameter_mm: PositiveMillimeters = 30.0
+    tube_height_mm: PositiveMillimeters = 100.0
+    cap_diameter_mm: PositiveMillimeters = 50.0
+    cap_thickness_mm: PositiveMillimeters = 6.0
+    cap_count: Annotated[int, Field(ge=1, le=4)] = 2
+
+    shaft_diameter_mm: PositiveMillimeters = 12.0
+    shaft_length_mm: PositiveMillimeters = 120.0
+    wheel_diameter_mm: PositiveMillimeters = 45.0
+    wheel_thickness_mm: PositiveMillimeters = 12.0
+    wheel_count: Annotated[int, Field(ge=1, le=4)] = 2
+
+    @model_validator(mode="after")
+    def validate_template_geometry(self) -> "AssemblyParameters":
+        if self.tube_outer_diameter_mm <= self.tube_inner_diameter_mm:
+            raise ValueError("tube_outer_diameter_mm must be greater than tube_inner_diameter_mm")
+        return self
+
+
 class CubeIntent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -202,6 +241,13 @@ class ExportStepIntent(BaseModel):
     parameters: ExportStepParameters
 
 
+class AssemblyIntent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tool_name: Literal["create_assembly"]
+    parameters: AssemblyParameters
+
+
 Intent = Annotated[
     Union[
         CubeIntent,
@@ -214,6 +260,7 @@ Intent = Annotated[
         ConeIntent,
         SphereIntent,
         TorusIntent,
+        AssemblyIntent,
         ExportStepIntent,
     ],
     Field(discriminator="tool_name"),

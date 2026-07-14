@@ -186,3 +186,21 @@ class RuleParserTests(unittest.TestCase):
         self.assertEqual(intent["parameters"]["diameter_mm"], -30.0)
         with self.assertRaises(ValueError):
             validate_intent(intent)
+
+    def test_base_plate_with_cylinders_assembly_prompt_parses_correctly(self) -> None:
+        intent = parse_prompt_rule_based("create an assembly with a base plate and two cylinders")
+
+        self.assertEqual(intent["tool_name"], "create_assembly")
+        self.assertEqual(intent["parameters"]["assembly_type"], "base_plate_with_cylinders")
+
+    def test_tube_with_end_discs_assembly_prompt_parses_correctly(self) -> None:
+        intent = parse_prompt_rule_based("create an assembly with a tube and two end discs")
+
+        self.assertEqual(intent["tool_name"], "create_assembly")
+        self.assertEqual(intent["parameters"]["assembly_type"], "tube_with_two_end_discs")
+
+    def test_shaft_with_wheels_assembly_prompt_parses_correctly(self) -> None:
+        intent = parse_prompt_rule_based("make axle with two wheels")
+
+        self.assertEqual(intent["tool_name"], "create_assembly")
+        self.assertEqual(intent["parameters"]["assembly_type"], "simple_shaft_with_two_wheels")

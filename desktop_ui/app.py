@@ -21,13 +21,18 @@ except ModuleNotFoundError:
 
 from parser.rule_parser import parse_prompt
 from router.tool_router import route_intent
-from utils.output_paths import ensure_output_dirs, get_user_output_root, is_safe_output_path
+from utils.output_paths import (
+    ensure_output_dirs,
+    get_assemblies_output_dir,
+    get_user_output_root,
+    is_safe_output_path,
+)
 from validator.validate_intent import validate_intent
 
 
 APP_TITLE = "MCP SolidWorks"
 DEFAULT_PROMPT = "Create a sphere with diameter 50 mm"
-EXAMPLES = [
+PART_EXAMPLES = [
     "Create a cube with side 50 mm",
     "Create a cylinder with diameter 30 mm and height 80 mm",
     "Create a hollow tube with outer diameter 50 mm, inner diameter 30 mm, and height 80 mm",
@@ -35,6 +40,11 @@ EXAMPLES = [
     "Create a cone with base diameter 50 mm and height 80 mm",
     "Create a sphere with diameter 50 mm",
     "Create a torus with major diameter 80 mm and minor diameter 20 mm",
+]
+ASSEMBLY_EXAMPLES = [
+    "Create an assembly with a base plate and two cylinders",
+    "Create an assembly with a tube and two end discs",
+    "Create an assembly with a shaft and two wheels",
 ]
 
 
@@ -63,12 +73,17 @@ def _tool_label(tool_name: str) -> str:
         "create_cone": "Cone",
         "create_sphere": "Sphere",
         "create_torus": "Torus",
+        "create_assembly": "Assembly",
         "export_step": "STEP export",
     }
     return labels.get(tool_name, "Model")
 
 
 def _dimension_summary(validated_intent: Any) -> str:
+    if validated_intent.tool_name == "create_assembly":
+        assembly_type = validated_intent.parameters.assembly_type.replace("_", " ")
+        return f"Assembly detected: {assembly_type}"
+
     values = validated_intent.parameters.model_dump()
     readable = []
     for key, value in values.items():
@@ -320,7 +335,10 @@ class MpcSolidWorksApp(_UI_BASE):
 
         ctk.CTkLabel(
             result_panel,
-            text=f"Output folder: {get_user_output_root()}",
+            text=(
+                f"Output folder: {get_user_output_root()}\n"
+                f"Assembly folder: {get_assemblies_output_dir()}"
+            ),
             text_color="#9fb0c3",
             wraplength=340,
             justify="left",
@@ -385,7 +403,9 @@ class MpcSolidWorksApp(_UI_BASE):
             self.events.put(("progress", "Understanding your request"))
             intent_dict, _parser_label = interpret_prompt(prompt)
 
-            self.events.put(("progress", "Checking dimensions"))
+            is_assembly = intent_dict.get("tool_name") == "create_assembly"
+            check_message = "Checking assembly components" if is_assembly else "Checking dimensions"
+            self.events.put(("progress", check_message))
             validated = validate_intent(intent_dict)
             self.events.put(("log", _dimension_summary(validated)))
 
@@ -393,13 +413,19 @@ class MpcSolidWorksApp(_UI_BASE):
             _attach_running_solidworks()
             self.events.put(("log", "Connected to SolidWorks"))
 
-            self.events.put(("progress", "Creating model"))
+            if is_assembly:
+                self.events.put(("progress", "Creating component parts"))
+                self.events.put(("progress", "Opening SolidWorks assembly document"))
+                self.events.put(("progress", "Inserting components"))
+                self.events.put(("progress", "Positioning components"))
+            else:
+                self.events.put(("progress", "Creating model"))
             result = route_intent(validated, dry_run=False)
 
-            self.events.put(("progress", "Saving file"))
+            self.events.put(("progress", "Saving assembly" if is_assembly else "Saving file"))
             filepath = Path(result.get("filepath", "")).resolve()
             filename = filepath.name if filepath.name else "local model"
-            self.events.put(("log", "Model created successfully"))
+            self.events.put(("log", result.get("message") or "Model created successfully"))
             if filepath.name:
                 self.events.put(("log", f"Saved: {filename}"))
             self.events.put(("success", result))
@@ -426,7 +452,23 @@ class MpcSolidWorksApp(_UI_BASE):
 
         frame = ctk.CTkScrollableFrame(dialog, fg_color="#101820")
         frame.pack(fill="both", expand=True, padx=18, pady=(0, 18))
-        for example in EXAMPLES:
+
+        self._add_help_section(frame, "Part examples", PART_EXAMPLES)
+        self._add_help_section(frame, "Assembly examples", ASSEMBLY_EXAMPLES)
+
+    def _add_help_section(
+        self,
+        frame: ctk.CTkScrollableFrame,
+        title: str,
+        examples: list[str],
+    ) -> None:
+        ctk.CTkLabel(
+            frame,
+            text=title,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="#bae6fd",
+        ).pack(anchor="w", padx=8, pady=(10, 4))
+        for example in examples:
             button = ctk.CTkButton(
                 frame,
                 text=example,
@@ -503,7 +545,10 @@ class MpcSolidWorksApp(_UI_BASE):
             and self.last_output_path.exists()
             and is_safe_output_path(self.last_output_path)
         ):
-            self.result_title.set("Model created successfully")
+            if self.last_output_path.suffix.lower() == ".sldasm":
+                self.result_title.set("Assembly created successfully")
+            else:
+                self.result_title.set("Model created successfully")
             self.result_detail.set(
                 f"File: {self.last_output_path.name}\nLocation: {self.last_output_path.parent}"
             )

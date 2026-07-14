@@ -38,7 +38,7 @@ class ExecuteResponse(BaseModel):
 class OutputFile(BaseModel):
     filename: str
     file_type: str
-    category: Literal["parts", "exports"]
+    category: Literal["parts", "exports", "assemblies"]
     relative_path: str
     size_bytes: int
     modified_time: str

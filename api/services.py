@@ -14,6 +14,7 @@ from parser.rule_parser import parse_prompt_rule_based
 from router.tool_router import route_intent
 from utils.output_paths import (
     ensure_output_dirs,
+    get_assemblies_output_dir,
     get_exports_output_dir,
     get_parts_output_dir,
     is_safe_output_path,
@@ -24,7 +25,7 @@ from validator.validate_intent import validate_intent
 SUPPORTED_TOOLS = [
     "create_cube", "create_block", "create_cylinder", "create_disc",
     "create_plate", "create_tube", "create_plate_with_hole", "create_cone",
-    "create_sphere", "create_torus", "export_step",
+    "create_sphere", "create_torus", "create_assembly", "export_step",
 ]
 
 
@@ -110,6 +111,7 @@ def list_outputs() -> list[dict[str, Any]]:
     for category, directory in (
         ("parts", get_parts_output_dir()),
         ("exports", get_exports_output_dir()),
+        ("assemblies", get_assemblies_output_dir()),
     ):
         for path in directory.iterdir():
             if not path.is_file() or path.name == ".gitkeep":
@@ -128,7 +130,11 @@ def list_outputs() -> list[dict[str, Any]]:
 
 def resolve_output_file(category: str, filename: str) -> Path:
     ensure_output_dirs()
-    directories = {"parts": get_parts_output_dir(), "exports": get_exports_output_dir()}
+    directories = {
+        "parts": get_parts_output_dir(),
+        "exports": get_exports_output_dir(),
+        "assemblies": get_assemblies_output_dir(),
+    }
     if category not in directories:
         raise ApiServiceError("Unknown output category.", 404)
     if not filename or Path(filename).name != filename or filename in {".", ".."}:

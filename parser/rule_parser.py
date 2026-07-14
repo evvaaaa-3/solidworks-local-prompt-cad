@@ -35,6 +35,70 @@ def _step_filename(prompt: str) -> str:
     return match.group(1).strip()
 
 
+def _parse_assembly_prompt(normalized: str) -> dict[str, Any] | None:
+    assembly_words = (
+        "assembly",
+        "base plate",
+        "mounting plate",
+        "posts",
+        "caps",
+        "end discs",
+        "end disks",
+        "wheels",
+        "axle",
+    )
+    if not any(word in normalized for word in assembly_words):
+        return None
+
+    if (
+        ("base plate" in normalized or "mounting plate" in normalized or "plate" in normalized)
+        and (
+            "two cylinders" in normalized
+            or "2 cylinders" in normalized
+            or "posts" in normalized
+            or "cylindrical posts" in normalized
+        )
+    ):
+        return {
+            "tool_name": "create_assembly",
+            "parameters": {
+                "assembly_type": "base_plate_with_cylinders",
+            },
+        }
+
+    if (
+        "tube" in normalized
+        or "pipe" in normalized
+    ) and (
+        "two end discs" in normalized
+        or "two end disks" in normalized
+        or "end discs" in normalized
+        or "end disks" in normalized
+        or "two caps" in normalized
+        or "end caps" in normalized
+        or "circular end plates" in normalized
+    ):
+        return {
+            "tool_name": "create_assembly",
+            "parameters": {
+                "assembly_type": "tube_with_two_end_discs",
+            },
+        }
+
+    if (
+        ("shaft" in normalized or "axle" in normalized)
+        and ("wheels" in normalized or "two wheels" in normalized)
+    ):
+        return {
+            "tool_name": "create_assembly",
+            "parameters": {
+                "assembly_type": "simple_shaft_with_two_wheels",
+            },
+        }
+
+    return None
+
+
 def parse_prompt_rule_based(prompt: str) -> dict[str, Any]:
     """Parse supported CAD prompts into a structured intent dictionary.
 
@@ -45,6 +109,10 @@ def parse_prompt_rule_based(prompt: str) -> dict[str, Any]:
     normalized = prompt.strip().lower()
     if not normalized:
         raise ValueError("Prompt cannot be empty.")
+
+    assembly_intent = _parse_assembly_prompt(normalized)
+    if assembly_intent is not None:
+        return assembly_intent
 
     if "export" in normalized and "step" in normalized:
         return {

@@ -136,3 +136,25 @@ class ValidatorTests(unittest.TestCase):
                     "parameters": {"major_diameter_mm": 20, "minor_diameter_mm": 20},
                 }
             )
+
+    def test_valid_assembly_intent_fills_defaults(self) -> None:
+        validated = validate_intent(
+            {
+                "tool_name": "create_assembly",
+                "parameters": {"assembly_type": "base_plate_with_cylinders"},
+            }
+        )
+
+        self.assertEqual(validated.tool_name, "create_assembly")
+        self.assertEqual(validated.parameters.assembly_type, "base_plate_with_cylinders")
+        self.assertEqual(validated.parameters.base_length_mm, 120.0)
+        self.assertEqual(validated.parameters.post_count, 2)
+
+    def test_invalid_assembly_type_fails(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_intent(
+                {
+                    "tool_name": "create_assembly",
+                    "parameters": {"assembly_type": "unsupported_assembly"},
+                }
+            )

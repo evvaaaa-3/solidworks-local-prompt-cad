@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
+
+from utils.output_paths import OUTPUT_ROOT_ENV_VAR
 
 
 try:
@@ -74,6 +78,19 @@ class ApiTests(unittest.TestCase):
     def test_output_download_rejects_unknown_category(self) -> None:
         response = self.client.get("/api/outputs/private/README.md")
         self.assertEqual(response.status_code, 404)
+
+    def test_output_listing_includes_assemblies(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            assembly_dir = Path(temp_dir) / "Assemblies"
+            assembly_dir.mkdir(parents=True)
+            (assembly_dir / "demo.SLDASM").write_text("assembly", encoding="utf-8")
+
+            with patch.dict("os.environ", {OUTPUT_ROOT_ENV_VAR: temp_dir}, clear=False):
+                response = self.client.get("/api/outputs")
+
+        self.assertEqual(response.status_code, 200)
+        assemblies = [item for item in response.json() if item["category"] == "assemblies"]
+        self.assertTrue(any(item["filename"] == "demo.SLDASM" for item in assemblies))
 
 
 if __name__ == "__main__":
