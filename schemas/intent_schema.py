@@ -129,6 +129,7 @@ AssemblyType = Literal[
     "base_plate_with_cylinders",
     "tube_with_two_end_discs",
     "simple_shaft_with_two_wheels",
+    "flanged_shaft_assembly",
 ]
 
 
@@ -156,6 +157,11 @@ class AssemblyParameters(BaseModel):
     wheel_diameter_mm: PositiveMillimeters = 45.0
     wheel_thickness_mm: PositiveMillimeters = 12.0
     wheel_count: Annotated[int, Field(ge=1, le=4)] = 2
+
+    flange_diameter_mm: PositiveMillimeters = 70.0
+    flange_thickness_mm: PositiveMillimeters = 12.0
+    hub_diameter_mm: PositiveMillimeters = 42.0
+    hub_thickness_mm: PositiveMillimeters = 16.0
 
     @model_validator(mode="after")
     def validate_template_geometry(self) -> "AssemblyParameters":

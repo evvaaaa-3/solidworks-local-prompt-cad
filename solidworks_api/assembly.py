@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from cad_tools.cad_schemas import TransformSpec
+from cad_tools.transforms import solidworks_transform_array, transform_translation_m
 from config import ensure_unique_filepath
 from solidworks_api.document import safe_get_doc_type, safe_get_title
 
@@ -141,6 +143,25 @@ def set_component_position(component: Any, x_m: float, y_m: float, z_m: float) -
             transform.ArrayData = data
             component.Transform2 = transform
             print(f"[SolidWorks] Component transform set to ({x_m}, {y_m}, {z_m}).")
+    except Exception as exc:
+        print(f"[SolidWorks] Component transform update skipped: {exc}")
+
+
+def set_component_transform(component: Any, transform_spec: TransformSpec) -> None:
+    """Set component transform from planner mm/degree units."""
+
+    data = solidworks_transform_array(transform_spec)
+    try:
+        transform = component.Transform2
+        current = list(_get_com_value(transform, "ArrayData"))
+        if len(current) >= len(data):
+            current[: len(data)] = data
+            transform.ArrayData = current
+        else:
+            transform.ArrayData = data
+        component.Transform2 = transform
+        x_m, y_m, z_m = transform_translation_m(transform_spec)
+        print(f"[SolidWorks] Component transform set to ({x_m}, {y_m}, {z_m}) with rotation.")
     except Exception as exc:
         print(f"[SolidWorks] Component transform update skipped: {exc}")
 

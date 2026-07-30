@@ -45,6 +45,7 @@ ASSEMBLY_EXAMPLES = [
     "Create an assembly with a base plate and two cylinders",
     "Create an assembly with a tube and two end discs",
     "Create an assembly with a shaft and two wheels",
+    "Create a flanged shaft assembly",
 ]
 
 
@@ -546,15 +547,27 @@ class MpcSolidWorksApp(_UI_BASE):
             and is_safe_output_path(self.last_output_path)
         ):
             if self.last_output_path.suffix.lower() == ".sldasm":
-                self.result_title.set("Assembly created successfully")
+                failed_constraints = result.get("constraints_failed", [])
+                warning_count = len(result.get("warnings", []))
+                self.result_title.set(
+                    "Assembly created with warnings"
+                    if failed_constraints or warning_count
+                    else "Assembly created successfully"
+                )
                 component_count = len(result.get("instances", []))
+                inserted_count = len(result.get("inserted_components", []))
                 applied_count = len(result.get("constraints_applied", []))
                 planned_count = len(result.get("constraints_planned", []))
+                failure_line = ""
+                if failed_constraints:
+                    failed_id = failed_constraints[0].get("constraint_id", "unknown")
+                    failure_line = f"\nFailed constraint: {failed_id}"
                 self.result_detail.set(
                     f"File: {self.last_output_path.name}\n"
                     f"Location: {self.last_output_path.parent}\n"
-                    f"Components inserted: {component_count}\n"
-                    f"Constraints planned/applied: {planned_count}/{applied_count}"
+                    f"Components inserted: {inserted_count} of {component_count}\n"
+                    f"Constraints applied: {applied_count} of {planned_count}"
+                    f"{failure_line}"
                 )
             else:
                 self.result_title.set("Model created successfully")

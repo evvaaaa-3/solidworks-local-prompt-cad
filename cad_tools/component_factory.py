@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Any
 
-from cad_tools import primitives
 from cad_tools.assembly_planner import AssemblyPlan, ComponentSpec
+from cad_tools.part_executor import execute_part_plan
+from cad_tools.part_planner import build_part_plan
 
 
 @dataclass(frozen=True)
@@ -20,11 +21,21 @@ class ComponentBuildResult:
     filename: str
     instance_count: int
     reused: bool
+    part_plan: dict[str, Any] | None = None
+    features_executed: tuple[str, ...] = ()
 
 
 def create_component_part(component: ComponentSpec, dry_run: bool = False) -> ComponentBuildResult:
-    creator = _creator_for(component)
-    result = creator(component, dry_run)
+    """Create or dry-run a reusable component part from a generic PartPlan."""
+
+    part_plan = build_part_plan(
+        part_name=component.id,
+        component_type=component.type,
+        dimensions=component.dimensions,
+        features=component.features,
+        material=getattr(component, "material", None),
+    )
+    result = execute_part_plan(part_plan, dry_run=dry_run)
     filepath = result.get("filepath") or f"<pending:{component.id}>"
     return ComponentBuildResult(
         component_id=component.id,
@@ -35,6 +46,8 @@ def create_component_part(component: ComponentSpec, dry_run: bool = False) -> Co
         filename=Path(filepath).name if not filepath.startswith("<pending:") else "",
         instance_count=component.quantity,
         reused=component.reuse_part,
+        part_plan=part_plan.model_dump(),
+        features_executed=tuple(result.get("features_executed", ())),
     )
 
 
@@ -42,7 +55,17 @@ def create_components_for_plan(plan: AssemblyPlan, dry_run: bool = False) -> dic
     created: dict[tuple[str, tuple[tuple[str, float], ...]], ComponentBuildResult] = {}
     results: dict[str, ComponentBuildResult] = {}
     for component in plan.components:
-        key = (component.type, tuple(sorted(component.dimensions.items())))
+        feature_key = tuple(
+            sorted(
+                (
+                    getattr(feature, "name", "") or getattr(feature, "feature_id", ""),
+                    getattr(feature, "type", "") or getattr(feature, "feature_type", ""),
+                    tuple(sorted((getattr(feature, "dimensions", {}) or {}).items())),
+                )
+                for feature in component.features
+            )
+        )
+        key = (component.type, tuple(sorted(component.dimensions.items())), feature_key)
         if component.reuse_part and key in created:
             existing = created[key]
             results[component.id] = ComponentBuildResult(
@@ -54,84 +77,11 @@ def create_components_for_plan(plan: AssemblyPlan, dry_run: bool = False) -> dic
                 filename=existing.filename,
                 instance_count=component.quantity,
                 reused=True,
+                part_plan=existing.part_plan,
+                features_executed=existing.features_executed,
             )
             continue
         built = create_component_part(component, dry_run=dry_run)
         created[key] = built
         results[component.id] = built
     return results
-
-
-def _creator_for(component: ComponentSpec) -> Callable[[ComponentSpec, bool], dict[str, object]]:
-    creators: dict[str, Callable[[ComponentSpec, bool], dict[str, object]]] = {
-        "plate": _create_plate,
-        "plate_with_hole": _create_plate_with_hole,
-        "cylinder": _create_cylinder,
-        "pin": _create_cylinder,
-        "shaft": _create_shaft,
-        "tube": _create_tube,
-        "disc": _create_disc,
-        "wheel": _create_disc,
-    }
-    try:
-        return creators[component.type]
-    except KeyError as exc:
-        raise ValueError(f"Unsupported component type: {component.type}") from exc
-
-
-def _create_plate(component: ComponentSpec, dry_run: bool) -> dict[str, object]:
-    dimensions = component.dimensions
-    return primitives.create_plate(
-        dimensions["length_mm"],
-        dimensions["width_mm"],
-        dimensions["thickness_mm"],
-        dry_run=dry_run,
-    )
-
-
-def _create_plate_with_hole(component: ComponentSpec, dry_run: bool) -> dict[str, object]:
-    dimensions = component.dimensions
-    return primitives.create_plate_with_hole(
-        dimensions["length_mm"],
-        dimensions["width_mm"],
-        dimensions["thickness_mm"],
-        dimensions["hole_diameter_mm"],
-        dry_run=dry_run,
-    )
-
-
-def _create_cylinder(component: ComponentSpec, dry_run: bool) -> dict[str, object]:
-    dimensions = component.dimensions
-    return primitives.create_cylinder(
-        dimensions["diameter_mm"],
-        dimensions["height_mm"],
-        dry_run=dry_run,
-    )
-
-
-def _create_shaft(component: ComponentSpec, dry_run: bool) -> dict[str, object]:
-    dimensions = component.dimensions
-    return primitives.create_cylinder(
-        dimensions["diameter_mm"],
-        dimensions["length_mm"],
-        dry_run=dry_run,
-    )
-
-
-def _create_tube(component: ComponentSpec, dry_run: bool) -> dict[str, object]:
-    dimensions = component.dimensions
-    return primitives.create_tube(
-        dimensions["outer_diameter_mm"],
-        dimensions["inner_diameter_mm"],
-        dimensions["height_mm"],
-        dry_run=dry_run,
-    )
-
-
-def _create_disc(component: ComponentSpec, dry_run: bool) -> dict[str, object]:
-    dimensions = component.dimensions
-    return primitives.create_disc(
-        dimensions["diameter_mm"],
-        dimensions["thickness_mm"],
-        dry_run=dry_run,
-    )

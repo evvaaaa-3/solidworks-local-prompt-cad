@@ -46,6 +46,9 @@ def _parse_assembly_prompt(normalized: str) -> dict[str, Any] | None:
         "end disks",
         "wheels",
         "axle",
+        "flange",
+        "flanged",
+        "hub",
     )
     if not any(word in normalized for word in assembly_words):
         return None
@@ -82,6 +85,17 @@ def _parse_assembly_prompt(normalized: str) -> dict[str, Any] | None:
             "tool_name": "create_assembly",
             "parameters": {
                 "assembly_type": "tube_with_two_end_discs",
+            },
+        }
+
+    if (
+        "flanged shaft" in normalized
+        or ("shaft" in normalized and "flange" in normalized)
+    ):
+        return {
+            "tool_name": "create_assembly",
+            "parameters": {
+                "assembly_type": "flanged_shaft_assembly",
             },
         }
 

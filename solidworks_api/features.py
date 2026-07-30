@@ -164,3 +164,54 @@ def revolve_boss(model: Any, angle_degrees: float = 360.0) -> Any:
     if feature is None:
         raise RuntimeError("SolidWorks failed to create boss revolve.")
     return feature
+
+
+def fillet(model: Any, radius_m: float) -> Any:
+    """Create a generic constant-radius fillet from the current selection."""
+
+    try:
+        feature = model.FeatureManager.FeatureFillet3(
+            195,
+            radius_m,
+            0.0,
+            0,
+            0,
+            0,
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+    except Exception as exc:
+        raise RuntimeError("Could not create SolidWorks fillet feature.") from exc
+    if feature is None:
+        raise RuntimeError("SolidWorks failed to create fillet feature.")
+    return feature
+
+
+def chamfer(model: Any, distance_m: float) -> Any:
+    """Create a generic equal-distance chamfer from the current selection."""
+
+    try:
+        feature = model.FeatureManager.InsertFeatureChamfer(4, 1, distance_m, 0.0, 0.0, 0.0, 0.0, 0.0)
+    except Exception as exc:
+        raise RuntimeError("Could not create SolidWorks chamfer feature.") from exc
+    if feature is None:
+        raise RuntimeError("SolidWorks failed to create chamfer feature.")
+    return feature
+
+
+def shell(model: Any, thickness_m: float) -> Any:
+    """Create a generic shell feature from the current selection."""
+
+    try:
+        feature = model.FeatureManager.InsertFeatureShell(thickness_m, False)
+    except Exception as exc:
+        raise RuntimeError("Could not create SolidWorks shell feature.") from exc
+    if feature is None:
+        raise RuntimeError("SolidWorks failed to create shell feature.")
+    return feature

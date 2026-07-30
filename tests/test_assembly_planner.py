@@ -86,6 +86,13 @@ class AssemblyPlannerTests(unittest.TestCase):
             ["shaft_1", "wheel_left", "wheel_right"],
         )
 
+    def test_flanged_shaft_demo_plan_uses_generic_constraints(self) -> None:
+        plan = build_assembly_plan("flanged_shaft_assembly", DEFAULT_PARAMETERS)
+
+        self.assertEqual({component.id for component in plan.components}, {"shaft", "flange", "hub"})
+        self.assertIn("distance", {constraint.type for constraint in plan.constraints})
+        self.assertFalse(any(constraint.type == "coordinate_place" for constraint in plan.constraints))
+
     def test_constraints_reference_valid_components_or_instances(self) -> None:
         plan = build_assembly_plan("tube_with_two_end_discs", DEFAULT_PARAMETERS)
 
@@ -123,6 +130,23 @@ class AssemblyPlannerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown component/instance"):
             validate_assembly_plan(plan)
 
+    def test_plan_validation_rejects_missing_constraint_value(self) -> None:
+        plan = AssemblyPlan(
+            assembly_type="bad",
+            components=(
+                ComponentSpec("plate", "plate", {"length_mm": 1, "width_mm": 1, "thickness_mm": 1}),
+            ),
+            instances=(
+                ComponentInstanceSpec("plate_1", "plate", "plate_1", (0, 0, 0)),
+                ComponentInstanceSpec("plate_2", "plate", "plate_2", (1, 0, 0)),
+            ),
+            constraints=(ConstraintSpec("distance", "plate_1", "top_face", "plate_2", "bottom_face"),),
+            output_filename="bad.SLDASM",
+        )
+
+        with self.assertRaisesRegex(ValueError, "requires a value"):
+            validate_assembly_plan(plan)
+
 
 class ComponentFactoryTests(unittest.TestCase):
     def test_component_factory_maps_plate(self) -> None:
@@ -131,12 +155,14 @@ class ComponentFactoryTests(unittest.TestCase):
             type="plate",
             dimensions={"length_mm": 100, "width_mm": 60, "thickness_mm": 5},
         )
-        with patch("cad_tools.component_factory.primitives.create_plate") as create_plate:
-            create_plate.return_value = {"filepath": "plate.SLDPRT"}
+        with patch("cad_tools.component_factory.execute_part_plan") as execute_part_plan:
+            execute_part_plan.return_value = {"filepath": "plate.SLDPRT", "features_executed": ["base_plate"]}
             result = create_component_part(component, dry_run=False)
 
-        create_plate.assert_called_once_with(100, 60, 5, dry_run=False)
+        execute_part_plan.assert_called_once()
+        self.assertEqual(execute_part_plan.call_args.args[0].base_feature.feature_type, "boss_extrude")
         self.assertEqual(result.filepath, "plate.SLDPRT")
+        self.assertEqual(result.features_executed, ("base_plate",))
 
     def test_component_factory_maps_shaft_to_cylinder(self) -> None:
         component = ComponentSpec(
@@ -144,17 +170,19 @@ class ComponentFactoryTests(unittest.TestCase):
             type="shaft",
             dimensions={"diameter_mm": 12, "length_mm": 120},
         )
-        with patch("cad_tools.component_factory.primitives.create_cylinder") as create_cylinder:
-            create_cylinder.return_value = {"filepath": "shaft.SLDPRT"}
+        with patch("cad_tools.component_factory.execute_part_plan") as execute_part_plan:
+            execute_part_plan.return_value = {"filepath": "shaft.SLDPRT", "features_executed": ["shaft_body"]}
             result = create_component_part(component, dry_run=False)
 
-        create_cylinder.assert_called_once_with(12, 120, dry_run=False)
+        execute_part_plan.assert_called_once()
+        self.assertEqual(execute_part_plan.call_args.args[0].base_feature.feature_id, "shaft_body")
         self.assertEqual(result.filepath, "shaft.SLDPRT")
 
 
 class AssemblyExecutorTests(unittest.TestCase):
     def test_generic_executor_with_mocked_solidworks_api(self) -> None:
         plan = build_assembly_plan("base_plate_with_cylinders", DEFAULT_PARAMETERS)
+        assembly_model = FakeAssemblyModel()
 
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = Path(temp_dir) / "base_plate_with_cylinders.SLDASM"
@@ -174,9 +202,9 @@ class AssemblyExecutorTests(unittest.TestCase):
 
             with patch("cad_tools.assemblies.create_components_for_plan", return_value=component_results), \
                 patch("cad_tools.assemblies.connect_solidworks", return_value=object()), \
-                patch("cad_tools.assemblies.create_new_assembly", return_value=object()), \
-                patch("cad_tools.assemblies.insert_component", return_value=object()) as insert_component, \
-                patch("cad_tools.assemblies.set_component_position"), \
+                patch("cad_tools.assemblies.create_new_assembly", return_value=assembly_model), \
+                patch("cad_tools.assemblies.insert_component", side_effect=lambda *_args: FakeComponent()) as insert_component, \
+                patch("cad_tools.assemblies.set_component_transform"), \
                 patch("cad_tools.assemblies.fix_component"), \
                 patch("cad_tools.assemblies.save_assembly", side_effect=fake_save):
                 result = execute_assembly_plan(plan, dry_run=False)
@@ -184,9 +212,60 @@ class AssemblyExecutorTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["operation"], "create_assembly")
         self.assertEqual(len(result["instances"]), 3)
-        self.assertTrue(result["placement_fallback_used"])
+        self.assertFalse(result["placement_fallback_used"])
         self.assertGreaterEqual(len(result["constraints_planned"]), 1)
+        self.assertEqual(len(result["constraints_failed"]), 0)
         self.assertEqual(insert_component.call_count, 3)
+
+    def test_executor_reports_structured_mate_failure(self) -> None:
+        plan = build_assembly_plan("tube_with_two_end_discs", DEFAULT_PARAMETERS)
+        assembly_model = FakeAssemblyModel(mate_success=False)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "tube_with_two_end_discs.SLDASM"
+
+            def fake_save(_assembly_model, _filepath):
+                output_path.write_text("assembly", encoding="utf-8")
+                return {"status": "success", "filepath": str(output_path)}
+
+            component_results = {
+                "tube": ComponentBuildResult(
+                    "tube", "tube", "tube", "body", "tube.SLDPRT", "tube.SLDPRT", 1, True
+                ),
+                "cap": ComponentBuildResult(
+                    "cap", "cap", "disc", "end_cap", "cap.SLDPRT", "cap.SLDPRT", 2, True
+                ),
+            }
+
+            with patch("cad_tools.assemblies.create_components_for_plan", return_value=component_results), \
+                patch("cad_tools.assemblies.connect_solidworks", return_value=object()), \
+                patch("cad_tools.assemblies.create_new_assembly", return_value=assembly_model), \
+                patch("cad_tools.assemblies.insert_component", side_effect=lambda *_args: FakeComponent()), \
+                patch("cad_tools.assemblies.set_component_transform"), \
+                patch("cad_tools.assemblies.fix_component"), \
+                patch("cad_tools.assemblies.save_assembly", side_effect=fake_save):
+                result = execute_assembly_plan(plan, dry_run=False)
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["status"], "partial_failure")
+        self.assertGreaterEqual(len(result["constraints_failed"]), 1)
+        self.assertIn("constraint_id", result["constraints_failed"][0])
+
+
+class FakeComponent:
+    def Select4(self, *_args):
+        return True
+
+
+class FakeAssemblyModel:
+    def __init__(self, mate_success: bool = True) -> None:
+        self.mate_success = mate_success
+
+    def AddMate5(self, *_args):
+        return object() if self.mate_success else None
+
+    def ForceRebuild3(self, *_args):
+        return True
 
 
 if __name__ == "__main__":
