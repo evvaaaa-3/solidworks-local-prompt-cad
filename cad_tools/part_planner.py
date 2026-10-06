@@ -23,6 +23,23 @@ def build_part_plan(
         _coerce_feature(feature, index + 10)
         for index, feature in enumerate(features)
     ]
+    if component_type == "tube":
+        converted_features.insert(
+            0,
+            FeatureSpec(
+                feature_id="tube_bore_cut",
+                feature_type="cut_extrude",
+                parameters={
+                    "profile": "center_circle",
+                    "diameter_mm": dimensions["inner_diameter_mm"],
+                    "through_all": True,
+                    "both_directions": True,
+                    "reverse": False,
+                },
+                reference_geometry=[ReferenceSpec(entity_type="front_plane", reference_name="Front Plane")],
+                operation_order=10,
+            ),
+        )
     filename = sanitize_filename(f"{part_name}_{component_type}.SLDPRT")
     return PartPlan(
         part_name=part_name,
@@ -68,18 +85,7 @@ def _base_feature_for(component_type: str, dimensions: dict[str, float]) -> Feat
     if component_type in {"disc", "wheel"}:
         return _circular_extrude("disc_body", dimensions["diameter_mm"], dimensions["thickness_mm"])
     if component_type == "tube":
-        return FeatureSpec(
-            feature_id="tube_body",
-            feature_type="boss_extrude",
-            parameters={
-                "profile": "concentric_circles",
-                "outer_diameter_mm": dimensions["outer_diameter_mm"],
-                "inner_diameter_mm": dimensions["inner_diameter_mm"],
-                "depth_mm": dimensions["height_mm"],
-            },
-            reference_geometry=[ReferenceSpec(entity_type="front_plane", reference_name="Front Plane")],
-            operation_order=0,
-        )
+        return _circular_extrude("tube_body", dimensions["outer_diameter_mm"], dimensions["height_mm"])
     raise ValueError(f"Unsupported component type: {component_type}")
 
 

@@ -19,8 +19,10 @@ except ModuleNotFoundError:
     ctk = None  # type: ignore[assignment]
     messagebox = None  # type: ignore[assignment]
 
-from parser.rule_parser import parse_prompt
+from llm.ollama_client import OllamaClient
+from parser.intent_parser import parse_prompt_with_metadata
 from router.tool_router import route_intent
+from solidworks_api.connection import connect_solidworks
 from utils.output_paths import (
     ensure_output_dirs,
     get_assemblies_output_dir,
@@ -49,13 +51,13 @@ ASSEMBLY_EXAMPLES = [
 ]
 
 
-def interpret_prompt(prompt: str) -> tuple[dict[str, Any], str]:
+def interpret_prompt(prompt: str, parser_mode: str = "rule") -> tuple[dict[str, Any], str, Any]:
     """Interpret a user prompt into the existing internal intent shape."""
 
-    # Future: call local Ollama first for flexible natural-language interpretation.
-    # If Ollama is unavailable or returns invalid structured intent,
-    # fall back to the existing deterministic parser.
-    return parse_prompt(prompt), "rule_parser"
+    result = parse_prompt_with_metadata(prompt, parser_mode=parser_mode)
+    if not result.success or result.parsed_intent is None:
+        raise ValueError(result.metadata.clarification_message or result.metadata.error or "Prompt parsing failed.")
+    return result.parsed_intent, result.metadata.parser_used, result.metadata
 
 
 def _now() -> str:
@@ -114,18 +116,6 @@ def _friendly_error(exc: Exception) -> str:
     return "The model could not be created. Please check SolidWorks and try again."
 
 
-def _attach_running_solidworks() -> Any:
-    try:
-        import win32com.client
-    except ImportError as exc:
-        raise RuntimeError("pywin32 is not installed.") from exc
-
-    try:
-        return win32com.client.GetActiveObject("SldWorks.Application")
-    except Exception as exc:
-        raise RuntimeError("SolidWorks is not running.") from exc
-
-
 def _initialize_com_for_worker() -> bool:
     pythoncom.CoInitialize()
     return True
@@ -156,8 +146,11 @@ class MpcSolidWorksApp(_UI_BASE):
 
         self.events: queue.Queue[tuple[str, Any]] = queue.Queue()
         self.is_running = False
+        self.cancel_requested = False
         self.last_output_path: Path | None = None
         self.connection_status = ctk.StringVar(value="SolidWorks: Checking...")
+        self.ollama_status = ctk.StringVar(value="Ollama: Checking...")
+        self.parser_mode = ctk.StringVar(value="rule")
         self.progress_status = ctk.StringVar(value="Ready")
         self.result_title = ctk.StringVar(value="No model created yet.")
         self.result_detail = ctk.StringVar(value="")
@@ -210,6 +203,17 @@ class MpcSolidWorksApp(_UI_BASE):
             command=self.refresh_connection,
         )
         self.refresh_button.pack(side="left")
+        self.ollama_badge = ctk.CTkLabel(
+            status_block,
+            textvariable=self.ollama_status,
+            fg_color="#334155",
+            text_color="#dbeafe",
+            corner_radius=18,
+            padx=14,
+            pady=7,
+            font=ctk.CTkFont(size=13, weight="bold"),
+        )
+        self.ollama_badge.pack(side="left", padx=(10, 0))
 
         body = ctk.CTkFrame(self, fg_color="#0b1117", corner_radius=0)
         body.grid(row=1, column=0, sticky="nsew")
@@ -242,8 +246,18 @@ class MpcSolidWorksApp(_UI_BASE):
         self.prompt_box.grid(row=1, column=0, padx=18, pady=(0, 14), sticky="nsew")
         self.prompt_box.insert("1.0", DEFAULT_PROMPT)
 
+        mode_row = ctk.CTkFrame(prompt_panel, fg_color="transparent")
+        mode_row.grid(row=2, column=0, padx=18, pady=(0, 12), sticky="ew")
+        ctk.CTkLabel(mode_row, text="Parser mode", text_color="#cbd5e1").pack(side="left", padx=(0, 10))
+        self.parser_selector = ctk.CTkSegmentedButton(
+            mode_row,
+            values=["rule", "ollama", "auto"],
+            variable=self.parser_mode,
+        )
+        self.parser_selector.pack(side="left")
+
         action_row = ctk.CTkFrame(prompt_panel, fg_color="transparent")
-        action_row.grid(row=2, column=0, padx=18, pady=(0, 18), sticky="ew")
+        action_row.grid(row=3, column=0, padx=18, pady=(0, 18), sticky="ew")
         action_row.grid_columnconfigure(0, weight=1)
         self.create_button = ctk.CTkButton(
             action_row,
@@ -262,9 +276,19 @@ class MpcSolidWorksApp(_UI_BASE):
             command=self.open_help,
         )
         self.help_button.grid(row=0, column=1, sticky="e")
+        self.cancel_button = ctk.CTkButton(
+            action_row,
+            text="Cancel",
+            height=44,
+            fg_color="#4c1d1d",
+            hover_color="#7f1d1d",
+            command=self.cancel_request,
+            state="disabled",
+        )
+        self.cancel_button.grid(row=0, column=2, sticky="e", padx=(10, 0))
 
         progress_panel = ctk.CTkFrame(prompt_panel, fg_color="#0d151d", corner_radius=8)
-        progress_panel.grid(row=3, column=0, padx=18, pady=(0, 18), sticky="ew")
+        progress_panel.grid(row=4, column=0, padx=18, pady=(0, 18), sticky="ew")
         ctk.CTkLabel(
             progress_panel,
             textvariable=self.progress_status,
@@ -355,15 +379,17 @@ class MpcSolidWorksApp(_UI_BASE):
 
     def refresh_connection(self) -> None:
         self.connection_status.set("SolidWorks: Checking...")
+        self.ollama_status.set("Ollama: Checking...")
         self._set_status_color("checking")
         self.refresh_button.configure(state="disabled")
         threading.Thread(target=self._check_connection_worker, daemon=True).start()
+        threading.Thread(target=self._check_ollama_worker, daemon=True).start()
 
     def _check_connection_worker(self) -> None:
         com_initialized = False
         try:
             com_initialized = _initialize_com_for_worker()
-            _attach_running_solidworks()
+            connect_solidworks(visible=True)
         except Exception:
             print("SolidWorks connection check failed:")
             traceback.print_exc()
@@ -372,6 +398,9 @@ class MpcSolidWorksApp(_UI_BASE):
             self.events.put(("connection", True))
         finally:
             _release_com_for_worker(com_initialized)
+
+    def _check_ollama_worker(self) -> None:
+        self.events.put(("ollama", OllamaClient().status()))
 
     def create_model(self) -> None:
         if self.is_running:
@@ -389,8 +418,10 @@ class MpcSolidWorksApp(_UI_BASE):
             return
 
         self.is_running = True
+        self.cancel_requested = False
         self.create_button.configure(state="disabled", text="Creating...")
         self.help_button.configure(state="disabled")
+        self.cancel_button.configure(state="normal")
         self.last_output_path = None
         self.show_file_button.configure(state="disabled")
         self.result_title.set("Creating model...")
@@ -402,7 +433,12 @@ class MpcSolidWorksApp(_UI_BASE):
         try:
             com_initialized = _initialize_com_for_worker()
             self.events.put(("progress", "Understanding your request"))
-            intent_dict, _parser_label = interpret_prompt(prompt)
+            intent_dict, parser_label, metadata = interpret_prompt(prompt, self.parser_mode.get())
+            self.events.put(("log", f"Parser: {parser_label}, confidence {metadata.confidence:g}"))
+            self.events.put(("log", f"Parsed intent: {intent_dict}"))
+            if self.cancel_requested:
+                self.events.put(("failure", "Request cancelled."))
+                return
 
             is_assembly = intent_dict.get("tool_name") == "create_assembly"
             check_message = "Checking assembly components" if is_assembly else "Checking dimensions"
@@ -411,7 +447,7 @@ class MpcSolidWorksApp(_UI_BASE):
             self.events.put(("log", _dimension_summary(validated)))
 
             self.events.put(("progress", "Connecting to SolidWorks"))
-            _attach_running_solidworks()
+            connect_solidworks(visible=True)
             self.events.put(("log", "Connected to SolidWorks"))
 
             if is_assembly:
@@ -422,6 +458,9 @@ class MpcSolidWorksApp(_UI_BASE):
             else:
                 self.events.put(("progress", "Creating model"))
             result = route_intent(validated, dry_run=False)
+            if self.cancel_requested:
+                self.events.put(("failure", "Request cancelled."))
+                return
 
             self.events.put(("progress", "Saving assembly" if is_assembly else "Saving file"))
             filepath = Path(result.get("filepath", "")).resolve()
@@ -454,11 +493,12 @@ class MpcSolidWorksApp(_UI_BASE):
         frame = ctk.CTkScrollableFrame(dialog, fg_color="#101820")
         frame.pack(fill="both", expand=True, padx=18, pady=(0, 18))
 
-        self._add_help_section(frame, "Part examples", PART_EXAMPLES)
-        self._add_help_section(frame, "Assembly examples", ASSEMBLY_EXAMPLES)
+        self._add_help_section(dialog, frame, "Part examples", PART_EXAMPLES)
+        self._add_help_section(dialog, frame, "Assembly examples", ASSEMBLY_EXAMPLES)
 
     def _add_help_section(
         self,
+        dialog: ctk.CTkToplevel,
         frame: ctk.CTkScrollableFrame,
         title: str,
         examples: list[str],
@@ -503,9 +543,16 @@ class MpcSolidWorksApp(_UI_BASE):
             ensure_output_dirs()
             os.startfile(output_dir)
 
+    def cancel_request(self) -> None:
+        if self.is_running:
+            self.cancel_requested = True
+            self.progress_status.set("Cancelling...")
+            self._log("Cancellation requested")
+
     def _poll_events(self) -> None:
         handlers: dict[str, Callable[[Any], None]] = {
             "connection": self._handle_connection,
+            "ollama": self._handle_ollama,
             "progress": self._handle_progress,
             "log": self._log,
             "success": self._handle_success,
@@ -531,6 +578,17 @@ class MpcSolidWorksApp(_UI_BASE):
             self._set_status_color("not_running")
             self._log("SolidWorks is not running")
         self.refresh_button.configure(state="normal")
+
+    def _handle_ollama(self, status: Any) -> None:
+        if status.available and status.model_available:
+            self.ollama_status.set(f"Ollama: {status.model}")
+            self.ollama_badge.configure(fg_color="#14532d", text_color="#bbf7d0")
+        elif status.available:
+            self.ollama_status.set("Ollama: Model Missing")
+            self.ollama_badge.configure(fg_color="#713f12", text_color="#fde68a")
+        else:
+            self.ollama_status.set("Ollama: Unavailable")
+            self.ollama_badge.configure(fg_color="#4c1d1d", text_color="#fecaca")
 
     def _handle_progress(self, status: str) -> None:
         self.progress_status.set(status)
@@ -558,15 +616,19 @@ class MpcSolidWorksApp(_UI_BASE):
                 inserted_count = len(result.get("inserted_components", []))
                 applied_count = len(result.get("constraints_applied", []))
                 planned_count = len(result.get("constraints_planned", []))
+                failed_count = len(failed_constraints)
                 failure_line = ""
                 if failed_constraints:
-                    failed_id = failed_constraints[0].get("constraint_id", "unknown")
-                    failure_line = f"\nFailed constraint: {failed_id}"
+                    failed = failed_constraints[0]
+                    failed_id = failed.get("constraint_id", "unknown")
+                    reason = failed.get("message") or failed.get("solidworks_error") or "unknown reason"
+                    failure_line = f"\nFailed: {failed_id} ({reason})"
                 self.result_detail.set(
                     f"File: {self.last_output_path.name}\n"
                     f"Location: {self.last_output_path.parent}\n"
                     f"Components inserted: {inserted_count} of {component_count}\n"
-                    f"Constraints applied: {applied_count} of {planned_count}"
+                    f"Constraints applied: {applied_count} of {planned_count}\n"
+                    f"Constraints failed: {failed_count}"
                     f"{failure_line}"
                 )
             else:
@@ -592,8 +654,10 @@ class MpcSolidWorksApp(_UI_BASE):
 
     def _finish_request(self) -> None:
         self.is_running = False
+        self.cancel_requested = False
         self.create_button.configure(state="normal", text="Create Model")
         self.help_button.configure(state="normal")
+        self.cancel_button.configure(state="disabled")
 
     def _log(self, message: str) -> None:
         self.activity_log.configure(state="normal")

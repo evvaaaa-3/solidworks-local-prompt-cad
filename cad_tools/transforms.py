@@ -70,6 +70,51 @@ def transform_rotation_rad(transform: TransformSpec) -> tuple[float, float, floa
     )
 
 
+def has_rotation(transform: TransformSpec) -> bool:
+    """Return whether a transform includes any axis rotation."""
+
+    return any(
+        abs(value) > 1e-9
+        for value in (transform.rotation_x, transform.rotation_y, transform.rotation_z)
+    )
+
+
+def m_to_mm(value_m: float) -> float:
+    """Convert SolidWorks metre values back to planner millimetres."""
+
+    return value_m * 1000.0
+
+
+def transform_array_translation_mm(array_data: Iterable[float]) -> tuple[float, float, float] | None:
+    """Read SolidWorks transform translation entries as millimetres."""
+
+    values = list(array_data)
+    if len(values) < 12:
+        return None
+    return (m_to_mm(values[9]), m_to_mm(values[10]), m_to_mm(values[11]))
+
+
+def align_axis_to_axis(source_axis: str, target_axis: str) -> TransformSpec:
+    """Return a simple axis-aligned rotation that maps one primary axis to another."""
+
+    source = source_axis.strip().lower()
+    target = target_axis.strip().lower()
+    if source == target:
+        return TransformSpec()
+    rotations = {
+        ("x", "y"): TransformSpec(rotation_z=90.0),
+        ("x", "z"): TransformSpec(rotation_y=-90.0),
+        ("y", "x"): TransformSpec(rotation_z=-90.0),
+        ("y", "z"): TransformSpec(rotation_x=90.0),
+        ("z", "x"): TransformSpec(rotation_y=90.0),
+        ("z", "y"): TransformSpec(rotation_x=-90.0),
+    }
+    try:
+        return rotations[(source, target)]
+    except KeyError as exc:
+        raise ValueError("source_axis and target_axis must be x, y, or z") from exc
+
+
 def solidworks_transform_array(transform: TransformSpec) -> list[float]:
     """Build a SolidWorks-compatible 4x4 rigid transform array.
 

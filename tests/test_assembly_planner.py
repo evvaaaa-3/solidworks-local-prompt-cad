@@ -16,6 +16,7 @@ from cad_tools.assembly_planner import (
     validate_assembly_plan,
 )
 from cad_tools.component_factory import ComponentBuildResult, create_component_part
+from cad_tools.transforms import transform_rotation_rad, transform_translation_m
 
 
 DEFAULT_PARAMETERS = {
@@ -70,6 +71,31 @@ class AssemblyPlannerTests(unittest.TestCase):
             "post_left",
             "post_right",
         ])
+
+    def test_base_plate_post_transforms_are_distinct_and_inside_plate_bounds(self) -> None:
+        plan = build_assembly_plan("base_plate_with_cylinders", DEFAULT_PARAMETERS)
+        instances = {instance.id: instance for instance in plan.instances}
+
+        left = instances["post_left"].effective_transform()
+        right = instances["post_right"].effective_transform()
+        plate = next(component for component in plan.components if component.id == "base_plate")
+        post = next(component for component in plan.components if component.id == "post")
+        half_length = plate.dimensions["length_mm"] / 2.0
+        radius = post.dimensions["diameter_mm"] / 2.0
+
+        self.assertIsNot(left, right)
+        self.assertNotEqual(left.translation_x, right.translation_x)
+        self.assertEqual(left.translation_z, post.dimensions["height_mm"])
+        self.assertEqual(right.translation_z, post.dimensions["height_mm"])
+        self.assertLessEqual(abs(left.translation_x) + radius, half_length)
+        self.assertLessEqual(abs(right.translation_x) + radius, half_length)
+
+    def test_base_plate_transform_unit_conversions(self) -> None:
+        plan = build_assembly_plan("base_plate_with_cylinders", DEFAULT_PARAMETERS)
+        transform = next(instance for instance in plan.instances if instance.id == "post_right").effective_transform()
+
+        self.assertEqual(transform_translation_m(transform)[2], 0.04)
+        self.assertEqual(transform_rotation_rad(transform), (0.0, 0.0, 0.0))
 
     def test_tube_plan_has_tube_and_two_cap_instances(self) -> None:
         plan = build_assembly_plan("tube_with_two_end_discs", DEFAULT_PARAMETERS)
@@ -204,18 +230,67 @@ class AssemblyExecutorTests(unittest.TestCase):
                 patch("cad_tools.assemblies.connect_solidworks", return_value=object()), \
                 patch("cad_tools.assemblies.create_new_assembly", return_value=assembly_model), \
                 patch("cad_tools.assemblies.insert_component", side_effect=lambda *_args: FakeComponent()) as insert_component, \
-                patch("cad_tools.assemblies.set_component_transform"), \
+                patch("cad_tools.assemblies.set_component_transform", side_effect=_fake_transform_report), \
                 patch("cad_tools.assemblies.fix_component"), \
                 patch("cad_tools.assemblies.save_assembly", side_effect=fake_save):
                 result = execute_assembly_plan(plan, dry_run=False)
 
-        self.assertTrue(result["success"])
+        self.assertFalse(result["success"])
         self.assertEqual(result["operation"], "create_assembly")
         self.assertEqual(len(result["instances"]), 3)
         self.assertFalse(result["placement_fallback_used"])
         self.assertGreaterEqual(len(result["constraints_planned"]), 1)
-        self.assertEqual(len(result["constraints_failed"]), 0)
+        self.assertGreaterEqual(len(result["constraints_failed"]), 1)
         self.assertEqual(insert_component.call_count, 3)
+        self.assertEqual(len(result["inserted_components"]), 3)
+        self.assertIn("message", result["constraints_failed"][0])
+
+    def test_executor_maps_duplicate_part_instances_by_instance_id(self) -> None:
+        plan = build_assembly_plan("base_plate_with_cylinders", DEFAULT_PARAMETERS)
+        assembly_model = FakeAssemblyModel()
+        fake_components = [FakeComponent("plate"), FakeComponent("left"), FakeComponent("right")]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "base_plate_with_cylinders.SLDASM"
+
+            def fake_save(_assembly_model, _filepath):
+                output_path.write_text("assembly", encoding="utf-8")
+                return {"status": "success", "filepath": str(output_path)}
+
+            component_results = {
+                "base_plate": ComponentBuildResult(
+                    "base_plate", "base_plate", "plate", "base", "plate.SLDPRT", "plate.SLDPRT", 1, True
+                ),
+                "post": ComponentBuildResult(
+                    "post", "post", "cylinder", "post", "post.SLDPRT", "post.SLDPRT", 2, True
+                ),
+            }
+
+            requested_actuals = [
+                (0.0, 0.0, 0.0),
+                (-30.0, 0.0, 40.0),
+                (30.0, 0.0, 40.0),
+            ]
+
+            with patch("cad_tools.assemblies.create_components_for_plan", return_value=component_results), \
+                patch("cad_tools.assemblies.connect_solidworks", return_value=object()), \
+                patch("cad_tools.assemblies.create_new_assembly", return_value=assembly_model), \
+                patch("cad_tools.assemblies.insert_component", side_effect=fake_components), \
+                patch("cad_tools.assemblies.get_component_translation_mm", side_effect=requested_actuals), \
+                patch("cad_tools.assemblies.set_component_transform") as set_transform, \
+                patch("cad_tools.assemblies.fix_component"), \
+                patch("cad_tools.assemblies.save_assembly", side_effect=fake_save):
+                result = execute_assembly_plan(plan, dry_run=False)
+
+        self.assertEqual(result["inserted_components"], ["base_plate_1", "post_left", "post_right"])
+        set_transform.assert_not_called()
+        self.assertEqual(len(result["transform_reports"]), 3)
+        self.assertEqual(result["transform_reports"][1]["instance_id"], "post_left")
+        self.assertEqual(result["transform_reports"][2]["instance_id"], "post_right")
+        self.assertNotEqual(
+            result["transform_reports"][1]["requested_translation_mm"],
+            result["transform_reports"][2]["requested_translation_mm"],
+        )
 
     def test_executor_reports_structured_mate_failure(self) -> None:
         plan = build_assembly_plan("tube_with_two_end_discs", DEFAULT_PARAMETERS)
@@ -241,7 +316,7 @@ class AssemblyExecutorTests(unittest.TestCase):
                 patch("cad_tools.assemblies.connect_solidworks", return_value=object()), \
                 patch("cad_tools.assemblies.create_new_assembly", return_value=assembly_model), \
                 patch("cad_tools.assemblies.insert_component", side_effect=lambda *_args: FakeComponent()), \
-                patch("cad_tools.assemblies.set_component_transform"), \
+                patch("cad_tools.assemblies.set_component_transform", side_effect=_fake_transform_report), \
                 patch("cad_tools.assemblies.fix_component"), \
                 patch("cad_tools.assemblies.save_assembly", side_effect=fake_save):
                 result = execute_assembly_plan(plan, dry_run=False)
@@ -253,6 +328,9 @@ class AssemblyExecutorTests(unittest.TestCase):
 
 
 class FakeComponent:
+    def __init__(self, name: str = "component") -> None:
+        self.name = name
+
     def Select4(self, *_args):
         return True
 
@@ -266,6 +344,23 @@ class FakeAssemblyModel:
 
     def ForceRebuild3(self, *_args):
         return True
+
+
+def _fake_transform_report(_component, transform):
+    return {
+        "applied": True,
+        "requested_translation_mm": (
+            transform.translation_x,
+            transform.translation_y,
+            transform.translation_z,
+        ),
+        "actual_translation_mm": (
+            transform.translation_x,
+            transform.translation_y,
+            transform.translation_z,
+        ),
+        "error": None,
+    }
 
 
 if __name__ == "__main__":

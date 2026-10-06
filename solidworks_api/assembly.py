@@ -6,7 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from cad_tools.cad_schemas import TransformSpec
-from cad_tools.transforms import solidworks_transform_array, transform_translation_m
+from cad_tools.transforms import (
+    solidworks_transform_array,
+    transform_array_translation_mm,
+    transform_translation_m,
+)
 from config import ensure_unique_filepath
 from solidworks_api.document import safe_get_doc_type, safe_get_title
 
@@ -147,10 +151,27 @@ def set_component_position(component: Any, x_m: float, y_m: float, z_m: float) -
         print(f"[SolidWorks] Component transform update skipped: {exc}")
 
 
-def set_component_transform(component: Any, transform_spec: TransformSpec) -> None:
+def get_component_translation_mm(component: Any) -> tuple[float, float, float] | None:
+    """Read a component Transform2 translation back in millimetres when available."""
+
+    try:
+        transform = component.Transform2
+        data = list(_get_com_value(transform, "ArrayData"))
+    except Exception as exc:
+        print(f"[SolidWorks] Component transform readback skipped: {exc}")
+        return None
+    return transform_array_translation_mm(data)
+
+
+def set_component_transform(component: Any, transform_spec: TransformSpec) -> dict[str, Any]:
     """Set component transform from planner mm/degree units."""
 
     data = solidworks_transform_array(transform_spec)
+    requested_mm = (
+        transform_spec.translation_x,
+        transform_spec.translation_y,
+        transform_spec.translation_z,
+    )
     try:
         transform = component.Transform2
         current = list(_get_com_value(transform, "ArrayData"))
@@ -162,8 +183,22 @@ def set_component_transform(component: Any, transform_spec: TransformSpec) -> No
         component.Transform2 = transform
         x_m, y_m, z_m = transform_translation_m(transform_spec)
         print(f"[SolidWorks] Component transform set to ({x_m}, {y_m}, {z_m}) with rotation.")
+        actual_mm = get_component_translation_mm(component)
+        print(f"[SolidWorks] Component transform readback mm: {actual_mm}")
+        return {
+            "applied": True,
+            "requested_translation_mm": requested_mm,
+            "actual_translation_mm": actual_mm,
+            "error": None,
+        }
     except Exception as exc:
         print(f"[SolidWorks] Component transform update skipped: {exc}")
+        return {
+            "applied": False,
+            "requested_translation_mm": requested_mm,
+            "actual_translation_mm": get_component_translation_mm(component),
+            "error": str(exc),
+        }
 
 
 def fix_component(assembly_model: Any, component: Any) -> None:

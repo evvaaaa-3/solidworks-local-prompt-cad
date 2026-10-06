@@ -6,7 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from cad_tools.cad_schemas import ConstraintExecutionError
+from cad_tools.cad_schemas import ConstraintExecutionError, TransformSpec
 from cad_tools.assembly_planner import (
     AssemblyPlan,
     ConstraintSpec,
@@ -14,13 +14,15 @@ from cad_tools.assembly_planner import (
     validate_assembly_plan,
 )
 from cad_tools.component_factory import ComponentBuildResult, create_components_for_plan
+from cad_tools.face_placement import face_relative_component_origin, top_face_frame_from_box
 from cad_tools.references import coerce_reference, resolve_component_reference
-from cad_tools.transforms import transform_translation_m
+from cad_tools.transforms import has_rotation, transform_translation_m
 from cad_tools.verification import build_assembly_execution_result, result_to_summary_lines
 from config import mm_to_m, sanitize_filename
 from solidworks_api.assembly import (
     create_new_assembly,
     fix_component,
+    get_component_translation_mm,
     insert_component,
     save_assembly,
     set_component_transform,
@@ -70,9 +72,14 @@ def execute_assembly_plan(plan: AssemblyPlan, dry_run: bool = True) -> dict[str,
 
     component_results = create_components_for_plan(plan, dry_run=False)
     stages.append("generate_or_locate_component_files")
+    _log_assembly_plan(plan)
     assembly_model = _new_assembly_model()
     stages.append("create_assembly_document")
-    inserted_components, insertion_errors = _insert_plan_instances(assembly_model, plan, component_results)
+    inserted_components, insertion_errors, transform_reports = _insert_plan_instances(
+        assembly_model,
+        plan,
+        component_results,
+    )
     stages.extend(["insert_component_instances", "apply_initial_transforms"])
     constraints_applied, constraints_failed = _apply_constraints(
         assembly_model,
@@ -92,6 +99,7 @@ def execute_assembly_plan(plan: AssemblyPlan, dry_run: bool = True) -> dict[str,
         stages,
         rebuild_attempted,
         insertion_errors,
+        transform_reports,
     )
 
 
@@ -104,24 +112,82 @@ def _insert_plan_instances(
     assembly_model: Any,
     plan: AssemblyPlan,
     component_results: dict[str, ComponentBuildResult],
-) -> tuple[dict[str, Any], list[str]]:
+) -> tuple[dict[str, Any], list[str], list[dict[str, Any]]]:
     inserted: dict[str, Any] = {}
     errors: list[str] = []
+    transform_reports: list[dict[str, Any]] = []
     for instance in plan.instances:
         component_result = component_results[instance.component_id]
         if not component_result.filepath or component_result.filepath.startswith("<pending:"):
             errors.append(f"Instance {instance.id} has no component file path.")
             continue
-        transform = instance.effective_transform()
+        transform = _resolve_instance_transform(instance, inserted, plan)
         x_m, y_m, z_m = transform_translation_m(transform)
         try:
             component = insert_component(assembly_model, component_result.filepath, x_m, y_m, z_m)
-            set_component_transform(component, transform)
+            if has_rotation(transform):
+                report = set_component_transform(component, transform)
+            else:
+                actual_mm = get_component_translation_mm(component)
+                report = {
+                    "applied": True,
+                    "method": "insert_component_translation",
+                    "requested_translation_mm": (
+                        transform.translation_x,
+                        transform.translation_y,
+                        transform.translation_z,
+                    ),
+                    "actual_translation_mm": actual_mm,
+                    "error": None,
+                }
         except Exception as exc:
             errors.append(f"Instance {instance.id} insertion failed: {exc}")
             continue
+        report.update(
+            {
+                "instance_id": instance.id,
+                "component_id": instance.component_id,
+                "component_filepath": component_result.filepath,
+            }
+        )
+        if not report.get("applied", False):
+            errors.append(f"Instance {instance.id} transform failed: {report.get('error')}")
+        transform_reports.append(report)
         inserted[instance.id] = component
-    return inserted, errors
+    return inserted, errors, transform_reports
+
+
+def _resolve_instance_transform(
+    instance: Any,
+    inserted_components: dict[str, Any],
+    plan: AssemblyPlan,
+) -> Any:
+    transform = instance.effective_transform()
+    placement = getattr(instance, "placement", None)
+    if placement is None:
+        return transform
+    target_instance = next(
+        (candidate for candidate in plan.instances if candidate.id == placement.target_instance_id),
+        None,
+    )
+    if target_instance is None or placement.target_instance_id not in inserted_components:
+        raise ValueError(
+            f"Placement for {instance.id} references target instance "
+            f"{placement.target_instance_id} before it is inserted."
+        )
+    target_transform = target_instance.effective_transform()
+    if placement.target_reference != "top_face":
+        raise ValueError(f"Unsupported face-relative placement reference: {placement.target_reference}")
+    frame = top_face_frame_from_box(target_transform)
+    origin = face_relative_component_origin(frame, placement)
+    return TransformSpec(
+        translation_x=origin[0],
+        translation_y=origin[1],
+        translation_z=origin[2],
+        rotation_x=transform.rotation_x,
+        rotation_y=transform.rotation_y,
+        rotation_z=transform.rotation_z,
+    )
 
 
 def _apply_constraints(
@@ -244,6 +310,7 @@ def _save_plan_result(
     stages: list[str],
     rebuild_attempted: bool,
     execution_errors: list[str],
+    transform_reports: list[dict[str, Any]],
 ) -> dict[str, Any]:
     output_dir = get_assemblies_output_dir()
     filename = sanitize_filename(plan.output_filename)
@@ -278,6 +345,7 @@ def _save_plan_result(
             errors=verification.errors,
             stages=stages,
             verification_summary=result_to_summary_lines(verification, len(_planned_constraint_ids(plan))),
+            transform_reports=transform_reports,
             message=str(exc),
         )
 
@@ -308,6 +376,7 @@ def _save_plan_result(
         errors=verification.errors,
         stages=stages,
         verification_summary=result_to_summary_lines(verification, len(_planned_constraint_ids(plan))),
+        transform_reports=transform_reports,
         message="Assembly created successfully." if verification.success else "Assembly created with warnings.",
     )
 
@@ -326,6 +395,7 @@ def _result(
     stages: list[str],
     verification_summary: list[str],
     message: str,
+    transform_reports: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         "success": success,
@@ -348,6 +418,8 @@ def _result(
         "errors": errors,
         "execution_stages": stages,
         "verification_summary": verification_summary,
+        "transform_reports": transform_reports or [],
+        "assembly_plan_trace": _plan_trace(plan),
         "placement_fallback_used": _uses_coordinate_fallback(plan),
         "message": message,
     }
@@ -393,3 +465,27 @@ def _planned_constraint_ids(plan: AssemblyPlan) -> list[str]:
 
 def _uses_coordinate_fallback(plan: AssemblyPlan) -> bool:
     return any(constraint.type == "coordinate_place" for constraint in plan.constraints)
+
+
+def _plan_trace(plan: AssemblyPlan) -> dict[str, Any]:
+    return {
+        "assembly_type": plan.assembly_type,
+        "components": [asdict(component) for component in plan.components],
+        "instances": [_instance_dict(instance) for instance in plan.instances],
+        "constraints": [_constraint_dict(constraint) for constraint in plan.constraints if constraint.enabled],
+        "metadata": plan.metadata,
+    }
+
+
+def _log_assembly_plan(plan: AssemblyPlan) -> None:
+    print(f"[AssemblyPlan] type={plan.assembly_type}")
+    for component in plan.components:
+        print(f"[AssemblyPlan] component={asdict(component)}")
+    for instance in plan.instances:
+        transform = instance.effective_transform()
+        print(
+            "[AssemblyPlan] instance="
+            f"{instance.id} component={instance.component_id} transform={transform.model_dump()}"
+        )
+    for constraint in plan.constraints:
+        print(f"[AssemblyPlan] constraint={_constraint_dict(constraint)}")

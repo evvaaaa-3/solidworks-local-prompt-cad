@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from cad_tools.cad_schemas import TransformSpec
+from cad_tools.face_placement import FacePlacementSpec
 from cad_tools.references import coerce_reference
 from config import sanitize_filename
 
@@ -83,6 +84,7 @@ class ComponentInstanceSpec:
     rotation_deg: tuple[float, float, float] = (0.0, 0.0, 0.0)
     role: str = ""
     transform: TransformSpec | None = None
+    placement: FacePlacementSpec | None = None
 
     def effective_transform(self) -> TransformSpec:
         """Return explicit transform or convert legacy position/rotation fields."""
@@ -212,7 +214,14 @@ def build_assembly_plan(assembly_type: str, parameters: dict[str, Any]) -> Assem
 
 
 def _build_base_plate_with_cylinders(parameters: dict[str, Any]) -> AssemblyPlan:
-    z_mm = (parameters["base_thickness_mm"] + parameters["post_height_mm"]) / 2.0
+    base_length_mm = parameters["base_length_mm"]
+    base_width_mm = parameters["base_width_mm"]
+    base_thickness_mm = parameters["base_thickness_mm"]
+    post_radius_mm = parameters["post_diameter_mm"] / 2.0
+    clearance_mm = post_radius_mm * 1.25
+    max_offset_mm = max(0.0, (base_length_mm / 2.0) - clearance_mm)
+    x_offset_mm = min(base_length_mm * 0.25, max_offset_mm)
+    z_mm = parameters["post_height_mm"]
     return AssemblyPlan(
         assembly_type="base_plate_with_cylinders",
         components=(
@@ -221,9 +230,9 @@ def _build_base_plate_with_cylinders(parameters: dict[str, Any]) -> AssemblyPlan
                 type="plate",
                 role="base",
                 dimensions={
-                    "length_mm": parameters["base_length_mm"],
-                    "width_mm": parameters["base_width_mm"],
-                    "thickness_mm": parameters["base_thickness_mm"],
+                    "length_mm": base_length_mm,
+                    "width_mm": base_width_mm,
+                    "thickness_mm": base_thickness_mm,
                 },
             ),
             ComponentSpec(
@@ -239,8 +248,36 @@ def _build_base_plate_with_cylinders(parameters: dict[str, Any]) -> AssemblyPlan
         ),
         instances=(
             ComponentInstanceSpec("base_plate_1", "base_plate", "base_plate", (0.0, 0.0, 0.0), role="base"),
-            ComponentInstanceSpec("post_left", "post", "post_left", (-35.0, 0.0, z_mm), role="post"),
-            ComponentInstanceSpec("post_right", "post", "post_right", (35.0, 0.0, z_mm), role="post"),
+            ComponentInstanceSpec(
+                "post_left",
+                "post",
+                "post_left",
+                (-x_offset_mm, 0.0, z_mm),
+                role="post",
+                placement=FacePlacementSpec(
+                    target_instance_id="base_plate_1",
+                    target_reference="top_face",
+                    u_offset_mm=-x_offset_mm,
+                    v_offset_mm=0.0,
+                    source_axis="-Z",
+                    component_axis_length_mm=parameters["post_height_mm"],
+                ),
+            ),
+            ComponentInstanceSpec(
+                "post_right",
+                "post",
+                "post_right",
+                (x_offset_mm, 0.0, z_mm),
+                role="post",
+                placement=FacePlacementSpec(
+                    target_instance_id="base_plate_1",
+                    target_reference="top_face",
+                    u_offset_mm=x_offset_mm,
+                    v_offset_mm=0.0,
+                    source_axis="-Z",
+                    component_axis_length_mm=parameters["post_height_mm"],
+                ),
+            ),
         ),
         constraints=(
             ConstraintSpec("fixed", "base_plate_1", required=True, constraint_id="base_plate_fixed"),
@@ -253,12 +290,22 @@ def _build_base_plate_with_cylinders(parameters: dict[str, Any]) -> AssemblyPlan
                 "axis",
                 "post_right",
                 "axis",
-                {"symmetric_about": "y_axis", "distance_mm": 70.0, "value": 70.0},
+                {"symmetric_about": "y_axis", "distance_mm": x_offset_mm * 2.0, "value": x_offset_mm * 2.0},
                 constraint_id="posts_axis_distance",
             ),
         ),
         output_filename="base_plate_with_cylinders.SLDASM",
-        metadata={"description": "Base plate with two cylindrical posts"},
+        metadata={
+            "description": "Base plate with two cylindrical posts",
+            "native_component_axes": {
+                "plate_top_normal": "+Z",
+                "cylinder_axis": "-Z before assembly placement; insertion plane is the cylinder top face",
+            },
+            "layout_rule": (
+                "post x-offset is min(base_length * 0.25, base half-length minus diameter clearance); "
+                "post insertion z uses post height because SolidWorks boss extrusion is negative from the sketch plane"
+            ),
+        },
     )
 
 

@@ -20,7 +20,6 @@ from solidworks_api.features import (
 from solidworks_api.sketch import (
     draw_center_circle,
     draw_center_rectangle,
-    draw_concentric_circles,
     exit_sketch,
     select_front_plane,
     start_sketch,
@@ -99,12 +98,6 @@ def _execute_boss_extrude(model: Any, feature: FeatureSpec) -> None:
         draw_center_circle(model, mm_to_m(float(feature.parameters["hole_diameter_mm"]) / 2.0))
     elif profile == "center_circle":
         draw_center_circle(model, mm_to_m(float(feature.parameters["diameter_mm"]) / 2.0))
-    elif profile == "concentric_circles":
-        draw_concentric_circles(
-            model,
-            mm_to_m(float(feature.parameters["outer_diameter_mm"]) / 2.0),
-            mm_to_m(float(feature.parameters["inner_diameter_mm"]) / 2.0),
-        )
     else:
         raise ValueError(f"Unsupported boss_extrude profile: {profile}")
     exit_sketch(model)
@@ -112,13 +105,60 @@ def _execute_boss_extrude(model: Any, feature: FeatureSpec) -> None:
 
 
 def _execute_cut(model: Any, feature: FeatureSpec) -> None:
-    if feature.feature_type == "hole":
+    profile = feature.parameters.get("profile", "center_circle")
+    if profile == "center_circle" or feature.feature_type == "hole":
         select_front_plane(model)
         start_sketch(model)
+        _validate_active_cut_sketch(model, feature.feature_id)
         draw_center_circle(model, mm_to_m(float(feature.parameters["diameter_mm"]) / 2.0))
+        sketch = _active_sketch(model)
         exit_sketch(model)
+        _select_cut_sketch(sketch, feature.feature_id)
+    else:
+        raise ValueError(f"Unsupported cut_extrude profile: {profile}")
     if feature.parameters.get("through_all", False):
-        cut_extrude_through_all(model)
+        cut_extrude_through_all(
+            model,
+            feature_id=feature.feature_id,
+            feature_type=feature.feature_type,
+            reverse=bool(feature.parameters.get("reverse", False)),
+            both_directions=bool(feature.parameters.get("both_directions", True)),
+        )
     else:
         depth_mm = float(feature.parameters.get("depth_mm", feature.parameters.get("diameter_mm", 1.0)))
         cut_extrude_depth(model, mm_to_m(depth_mm))
+
+
+def _active_sketch(model: Any) -> Any:
+    sketch_manager = getattr(model, "SketchManager", None)
+    if sketch_manager is None:
+        return None
+    for name in ("ActiveSketch", "GetActiveSketch2"):
+        try:
+            value = getattr(sketch_manager, name)
+            return value() if callable(value) else value
+        except Exception:
+            continue
+    return None
+
+
+def _validate_active_cut_sketch(model: Any, feature_id: str) -> None:
+    if _active_sketch(model) is None:
+        raise RuntimeError(f"Cut feature {feature_id} has no active sketch after entering sketch mode.")
+
+
+def _select_cut_sketch(sketch: Any, feature_id: str) -> None:
+    if sketch is None:
+        raise RuntimeError(f"Cut feature {feature_id} could not resolve the newly created sketch.")
+    for method_name, args in (("Select2", (False, 0)), ("Select", (False,))):
+        method = getattr(sketch, method_name, None)
+        if method is None:
+            continue
+        try:
+            selected = method(*args)
+        except Exception as exc:
+            raise RuntimeError(f"Cut feature {feature_id} sketch selection failed: {exc}") from exc
+        if selected:
+            print(f"[SolidWorks] Cut feature {feature_id}: sketch selected with {method_name}.")
+            return
+    raise RuntimeError(f"Cut feature {feature_id} sketch selection failed.")
