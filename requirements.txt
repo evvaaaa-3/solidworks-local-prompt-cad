@@ -2,6 +2,7 @@ pywin32
 pydantic
 python-dotenv
 requests
+spacy
 pytest
 fastapi
 uvicorn[standard]

@@ -33,6 +33,13 @@ class CylinderParameters(BaseModel):
     height_mm: PositiveMillimeters
 
 
+class ShaftParameters(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    diameter_mm: PositiveMillimeters
+    length_mm: PositiveMillimeters
+
+
 class DiscParameters(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -191,6 +198,13 @@ class CylinderIntent(BaseModel):
     parameters: CylinderParameters
 
 
+class ShaftIntent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tool_name: Literal["create_shaft"]
+    parameters: ShaftParameters
+
+
 class DiscIntent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -259,6 +273,7 @@ Intent = Annotated[
         CubeIntent,
         BlockIntent,
         CylinderIntent,
+        ShaftIntent,
         DiscIntent,
         PlateIntent,
         TubeIntent,
@@ -271,3 +286,22 @@ Intent = Annotated[
     ],
     Field(discriminator="tool_name"),
 ]
+
+
+TOOL_PARAMETER_MODELS = {
+    "create_cube": CubeParameters,
+    "create_block": BlockParameters,
+    "create_cylinder": CylinderParameters,
+    "create_shaft": ShaftParameters,
+    "create_disc": DiscParameters,
+    "create_plate": PlateParameters,
+    "create_tube": TubeParameters,
+    "create_plate_with_hole": PlateWithHoleParameters,
+    "create_cone": ConeParameters,
+    "create_sphere": SphereParameters,
+    "create_torus": TorusParameters,
+    "create_assembly": AssemblyParameters,
+    "export_step": ExportStepParameters,
+}
+
+SUPPORTED_TOOL_NAMES = list(TOOL_PARAMETER_MODELS)

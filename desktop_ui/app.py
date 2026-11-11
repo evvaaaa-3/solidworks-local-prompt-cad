@@ -107,6 +107,8 @@ def _friendly_error(exc: Exception) -> str:
         )
     if "could not connect to solidworks" in text or "com automation" in text:
         return "SolidWorks is not running. Please open SolidWorks and try again."
+    if "ollama" in text and ("unavailable" in text or "could not be started" in text):
+        return "Ollama could not be started. Check the configured executable and local service."
     if "unsupported cad prompt" in text or "missing" in text or "need" in text:
         return "I could not understand that request. Open Help & Examples for supported commands."
     if "invalid cad intent" in text or "greater than 0" in text or "positive" in text:
@@ -434,6 +436,8 @@ class MpcSolidWorksApp(_UI_BASE):
             com_initialized = _initialize_com_for_worker()
             self.events.put(("progress", "Understanding your request"))
             intent_dict, parser_label, metadata = interpret_prompt(prompt, self.parser_mode.get())
+            self.events.put(("log", f"Raw prompt: {metadata.raw_prompt}"))
+            self.events.put(("log", f"NLP normalized: {metadata.normalized_prompt}"))
             self.events.put(("log", f"Parser: {parser_label}, confidence {metadata.confidence:g}"))
             self.events.put(("log", f"Parsed intent: {intent_dict}"))
             if self.cancel_requested:

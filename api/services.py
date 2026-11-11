@@ -10,8 +10,9 @@ from pathlib import Path
 from typing import Any
 
 from api.solidworks_lock import solidworks_operation_lock
-from parser.rule_parser import parse_prompt_rule_based
+from parser.intent_parser import parse_prompt_with_metadata
 from router.tool_router import route_intent
+from schemas.intent_schema import SUPPORTED_TOOL_NAMES
 from utils.output_paths import (
     ensure_output_dirs,
     get_assemblies_output_dir,
@@ -22,11 +23,7 @@ from utils.output_paths import (
 from validator.validate_intent import validate_intent
 
 
-SUPPORTED_TOOLS = [
-    "create_cube", "create_block", "create_cylinder", "create_disc",
-    "create_plate", "create_tube", "create_plate_with_hole", "create_cone",
-    "create_sphere", "create_torus", "create_assembly", "export_step",
-]
+SUPPORTED_TOOLS = SUPPORTED_TOOL_NAMES
 
 
 class ApiServiceError(Exception):
@@ -40,35 +37,81 @@ def _dump_model(value: Any) -> dict[str, Any]:
     return value.model_dump() if hasattr(value, "model_dump") else dict(value)
 
 
-def parse_prompt(prompt: str) -> dict[str, Any]:
-    parsed = None
+def parse_prompt(prompt: str, parser_mode: str = "rule", model_name: str | None = None) -> dict[str, Any]:
     try:
-        parsed = parse_prompt_rule_based(prompt)
-        validated = validate_intent(parsed)
+        result = parse_prompt_with_metadata(prompt, parser_mode=parser_mode, model_name=model_name)
     except ValueError as exc:
-        return {
-            "success": False, "raw_prompt": prompt, "parsed_intent": parsed,
-            "validated_intent": None, "error": str(exc),
-        }
+        return _parse_response(False, prompt, None, None, "invalid_parser_mode", str(exc))
+    metadata = result.metadata
+    if not result.success:
+        return _parse_response(
+            False,
+            prompt,
+            result.parsed_intent,
+            None,
+            metadata.error_code,
+            metadata.error,
+            metadata=metadata,
+        )
+    return _parse_response(
+        True,
+        prompt,
+        result.parsed_intent,
+        _dump_model(result.validated_intent),
+        None,
+        None,
+        metadata=metadata,
+    )
+
+
+def _parse_response(
+    success: bool,
+    prompt: str,
+    parsed: dict[str, Any] | None,
+    validated: dict[str, Any] | None,
+    code: str | None,
+    error: str | None,
+    *,
+    metadata: Any | None = None,
+) -> dict[str, Any]:
     return {
-        "success": True, "raw_prompt": prompt, "parsed_intent": parsed,
-        "validated_intent": _dump_model(validated), "error": None,
+        "success": success,
+        "raw_prompt": prompt,
+        "normalized_prompt": getattr(metadata, "normalized_prompt", None),
+        "preprocessing": getattr(metadata, "preprocessing", {}),
+        "parsed_intent": parsed,
+        "validated_intent": validated,
+        "parser_used": getattr(metadata, "parser_used", None),
+        "confidence": getattr(metadata, "confidence", None),
+        "missing_fields": getattr(metadata, "missing_fields", []),
+        "warnings": getattr(metadata, "warnings", []),
+        "clarification_required": getattr(metadata, "clarification_required", False),
+        "clarification_message": getattr(metadata, "clarification_message", None),
+        "validation_status": "valid" if success else code,
+        "error": error,
     }
 
 
-def execute_prompt(prompt: str, mode: str, confirmed: bool) -> dict[str, Any]:
+def execute_prompt(
+    prompt: str,
+    mode: str,
+    confirmed: bool,
+    parser_mode: str = "rule",
+    model_name: str | None = None,
+) -> dict[str, Any]:
     if mode == "real" and not confirmed:
         raise ApiServiceError("Real SolidWorks mode requires explicit confirmation.")
 
     logs: list[str] = []
-    try:
-        parsed = parse_prompt_rule_based(prompt)
-        logs.append("Prompt parsed successfully")
-        validated = validate_intent(parsed)
-        validated_dump = _dump_model(validated)
-        logs.append("Intent validated successfully")
-    except ValueError as exc:
-        raise ApiServiceError(str(exc)) from exc
+    parsed_result = parse_prompt_with_metadata(prompt, parser_mode=parser_mode, model_name=model_name)
+    if not parsed_result.success:
+        raise ApiServiceError(parsed_result.metadata.error or "Prompt parsing failed.")
+    parsed = parsed_result.parsed_intent
+    validated = parsed_result.validated_intent
+    validated_dump = _dump_model(validated)
+    logs.append(f"NLP normalized: {parsed_result.metadata.normalized_prompt}")
+    logs.append(f"Prompt parsed successfully with {parsed_result.metadata.parser_used}")
+    logs.append("Intent validated successfully")
 
     lock_acquired = False
     output = io.StringIO()
@@ -100,8 +143,23 @@ def execute_prompt(prompt: str, mode: str, confirmed: bool) -> dict[str, Any]:
 
     return {
         "success": True, "mode": mode, "raw_prompt": prompt,
+        "normalized_prompt": parsed_result.metadata.normalized_prompt,
+        "preprocessing": parsed_result.metadata.preprocessing,
         "parsed_intent": parsed, "validated_intent": validated_dump,
         "result": result, "logs": logs, "error": None,
+        "parser_used": parsed_result.metadata.parser_used,
+        "confidence": parsed_result.metadata.confidence,
+        "missing_fields": parsed_result.metadata.missing_fields,
+        "warnings": parsed_result.metadata.warnings,
+        "clarification_required": parsed_result.metadata.clarification_required,
+        "clarification_message": parsed_result.metadata.clarification_message,
+        "validation_status": "valid",
+        "execution_verification": {
+            "status": result.get("status"),
+            "verification_summary": result.get("verification_summary", []),
+            "warnings": result.get("warnings", []),
+            "errors": result.get("errors", []),
+        },
     }
 
 

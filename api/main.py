@@ -11,6 +11,7 @@ from api.services import (
     SUPPORTED_TOOLS, ApiServiceError, execute_prompt, list_outputs,
     parse_prompt, resolve_output_file,
 )
+from llm.ollama_client import OllamaClient
 from utils.output_paths import (
     get_assemblies_output_dir,
     get_exports_output_dir,
@@ -48,20 +49,37 @@ def status() -> dict[str, object]:
     }
 
 
+@app.get("/api/ollama/status")
+def ollama_status(model_name: str | None = None) -> dict[str, object]:
+    status = OllamaClient(model=model_name).status()
+    return {
+        "available": status.available,
+        "model": status.model,
+        "model_available": status.model_available,
+        "base_url": status.base_url,
+        "error": status.error,
+    }
+
+
 @app.post("/api/parse", response_model=ParseResponse)
 def parse(request: PromptRequest) -> dict[str, object]:
-    return parse_prompt(request.prompt)
+    return parse_prompt(request.prompt, request.parser_mode, request.model_name)
 
 
 @app.post("/api/execute", response_model=ExecuteResponse)
 def execute(request: ExecuteRequest):
     try:
-        return execute_prompt(request.prompt, request.mode, request.confirmed)
+        mode = "dry_run" if request.dry_run is True else request.mode
+        return execute_prompt(request.prompt, mode, request.confirmed, request.parser_mode, request.model_name)
     except ApiServiceError as exc:
         return JSONResponse(status_code=exc.status_code, content={
             "success": False, "mode": request.mode, "raw_prompt": request.prompt,
             "parsed_intent": None, "validated_intent": None, "result": None,
             "logs": [], "error": exc.message,
+            "parser_used": None, "confidence": None, "missing_fields": [],
+            "warnings": [], "clarification_required": False,
+            "clarification_message": None, "validation_status": None,
+            "execution_verification": None,
         })
 
 

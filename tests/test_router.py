@@ -56,6 +56,16 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(result["tool"], "create_disc")
         self.assertEqual(result["status"], "dry_run_success")
 
+    def test_dry_run_routes_shaft(self) -> None:
+        intent = validate_intent(
+            {"tool_name": "create_shaft", "parameters": {"diameter_mm": 30, "length_mm": 100}}
+        )
+
+        result = route_intent(intent, dry_run=True)
+
+        self.assertEqual(result["tool"], "create_shaft")
+        self.assertEqual(result["dimensions_mm"]["length_mm"], 100.0)
+
     def test_dry_run_routes_plate(self) -> None:
         intent = validate_intent(
             {

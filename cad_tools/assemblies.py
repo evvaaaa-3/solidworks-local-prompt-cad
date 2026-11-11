@@ -6,7 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from cad_tools.cad_schemas import ConstraintExecutionError, TransformSpec
+from cad_tools.cad_schemas import ConstraintExecutionError
 from cad_tools.assembly_planner import (
     AssemblyPlan,
     ConstraintSpec,
@@ -14,7 +14,6 @@ from cad_tools.assembly_planner import (
     validate_assembly_plan,
 )
 from cad_tools.component_factory import ComponentBuildResult, create_components_for_plan
-from cad_tools.face_placement import face_relative_component_origin, top_face_frame_from_box
 from cad_tools.references import coerce_reference, resolve_component_reference
 from cad_tools.transforms import has_rotation, transform_translation_m
 from cad_tools.verification import build_assembly_execution_result, result_to_summary_lines
@@ -30,6 +29,12 @@ from solidworks_api.assembly import (
 from solidworks_api.connection import connect_solidworks
 from solidworks_api.mates import apply_mate, rebuild_assembly
 from solidworks_api.selection import SolidWorksReferenceResolver
+from solidworks_api.geometry import (
+    build_mounting_transform,
+    resolve_component_mount_frame,
+    resolve_planar_face_frame,
+    set_component_transform_array,
+)
 from utils.output_paths import get_assemblies_output_dir
 
 
@@ -121,7 +126,7 @@ def _insert_plan_instances(
         if not component_result.filepath or component_result.filepath.startswith("<pending:"):
             errors.append(f"Instance {instance.id} has no component file path.")
             continue
-        transform = _resolve_instance_transform(instance, inserted, plan)
+        transform = instance.effective_transform()
         x_m, y_m, z_m = transform_translation_m(transform)
         try:
             component = insert_component(assembly_model, component_result.filepath, x_m, y_m, z_m)
@@ -140,6 +145,16 @@ def _insert_plan_instances(
                     "actual_translation_mm": actual_mm,
                     "error": None,
                 }
+            if getattr(instance, "placement", None) is not None:
+                try:
+                    placement_report = _apply_real_face_placement(instance, component, inserted)
+                except Exception as exc:
+                    placement_report = {
+                        "method": "real_face_mounting_frame",
+                        "applied": False,
+                        "error": f"real face placement failed: {exc}",
+                    }
+                report.update(placement_report)
         except Exception as exc:
             errors.append(f"Instance {instance.id} insertion failed: {exc}")
             continue
@@ -157,37 +172,50 @@ def _insert_plan_instances(
     return inserted, errors, transform_reports
 
 
-def _resolve_instance_transform(
+def _apply_real_face_placement(
     instance: Any,
+    component: Any,
     inserted_components: dict[str, Any],
-    plan: AssemblyPlan,
-) -> Any:
-    transform = instance.effective_transform()
+) -> dict[str, Any]:
     placement = getattr(instance, "placement", None)
     if placement is None:
-        return transform
-    target_instance = next(
-        (candidate for candidate in plan.instances if candidate.id == placement.target_instance_id),
-        None,
-    )
-    if target_instance is None or placement.target_instance_id not in inserted_components:
+        return {}
+    target_component = inserted_components.get(placement.target_instance_id)
+    if target_component is None:
         raise ValueError(
             f"Placement for {instance.id} references target instance "
             f"{placement.target_instance_id} before it is inserted."
         )
-    target_transform = target_instance.effective_transform()
     if placement.target_reference != "top_face":
         raise ValueError(f"Unsupported face-relative placement reference: {placement.target_reference}")
-    frame = top_face_frame_from_box(target_transform)
-    origin = face_relative_component_origin(frame, placement)
-    return TransformSpec(
-        translation_x=origin[0],
-        translation_y=origin[1],
-        translation_z=origin[2],
-        rotation_x=transform.rotation_x,
-        rotation_y=transform.rotation_y,
-        rotation_z=transform.rotation_z,
+    target_face = resolve_planar_face_frame(target_component, "maximum_z")
+    mount_frame = resolve_component_mount_frame(component)
+    transform_data, debug = build_mounting_transform(
+        component,
+        mount_frame,
+        target_face,
+        placement.u_offset_mm,
+        placement.v_offset_mm,
     )
+    set_component_transform_array(component, transform_data)
+    print(f"[AssemblyPlacement] Plate top face: {debug['plate_top_face']}")
+    print(
+        "[AssemblyPlacement] "
+        f"{instance.id}: native_axis={debug['native_axis']} "
+        f"bottom_point={debug['resolved_bottom_face_point']} "
+        f"requested_uv_mm={debug['requested_uv_mm']} "
+        f"calculated_position={debug['calculated_assembly_position']} "
+        f"final_axis={debug['final_transformed_axis']} "
+        f"bottom_to_plate_distance_mm={debug['bottom_face_to_plate_face_distance_mm']}"
+    )
+    return {
+        "method": "real_face_mounting_frame",
+        "applied": True,
+        "requested_uv_mm": debug["requested_uv_mm"],
+        "actual_translation_mm": get_component_translation_mm(component),
+        "placement_debug": debug,
+        "error": None,
+    }
 
 
 def _apply_constraints(
@@ -230,8 +258,9 @@ def _apply_constraints(
             reference_b = coerce_reference(constraint.entity_b)
             if reference_a is None or reference_b is None:
                 raise ValueError("constraint references are required")
-            resolve_component_reference(constraint.component_a, reference_a, component_a, resolver)
-            resolve_component_reference(constraint.component_b or "", reference_b, component_b, resolver)
+            _clear_selection(assembly_model)
+            resolve_component_reference(constraint.component_a, reference_a, component_a, resolver, append=False)
+            resolve_component_reference(constraint.component_b or "", reference_b, component_b, resolver, append=True)
         except Exception as exc:
             failed.append(
                 _constraint_error(
@@ -261,6 +290,16 @@ def _apply_constraints(
                 )
             )
     return applied, failed
+
+
+def _clear_selection(assembly_model: Any) -> None:
+    clear = getattr(assembly_model, "ClearSelection2", None)
+    if clear is None:
+        return
+    try:
+        clear(True)
+    except Exception as exc:
+        print(f"[SolidWorks] ClearSelection2 skipped: {exc}")
 
 
 def _constraint_result(constraint: ConstraintSpec, message: str) -> dict[str, Any]:

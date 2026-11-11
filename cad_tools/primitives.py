@@ -208,6 +208,23 @@ def create_cylinder(
     return _real_result("create_cylinder", dimensions, filename, model, "extrude")
 
 
+def create_shaft(diameter_mm: float, length_mm: float, dry_run: bool = True) -> dict[str, Any]:
+    dimensions = {
+        "diameter_mm": diameter_mm,
+        "length_mm": length_mm,
+    }
+    if dry_run:
+        return _dry_result(
+            "create_shaft",
+            dimensions,
+            f"Would create shaft with diameter {diameter_mm:g} mm and length {length_mm:g} mm.",
+        )
+
+    model = _extrude_circle(diameter_mm, length_mm)
+    filename = f"shaft_D{_dimension_label(diameter_mm)}_L{_dimension_label(length_mm)}mm.SLDPRT"
+    return _real_result("create_shaft", dimensions, filename, model, "extrude")
+
+
 def create_disc(diameter_mm: float, thickness_mm: float, dry_run: bool = True) -> dict[str, Any]:
     dimensions = {
         "diameter_mm": diameter_mm,

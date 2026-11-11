@@ -15,6 +15,7 @@ from cad_tools.primitives import (
     create_plate,
     create_plate_with_hole,
     create_sphere,
+    create_shaft,
     create_torus,
     create_tube,
 )
@@ -47,6 +48,13 @@ def _call_tool(tool_name: str, parameters: dict[str, Any], dry_run: bool) -> dic
         return create_cylinder(
             diameter_mm=parameters["diameter_mm"],
             height_mm=parameters["height_mm"],
+            dry_run=dry_run,
+        )
+
+    if tool_name == "create_shaft":
+        return create_shaft(
+            diameter_mm=parameters["diameter_mm"],
+            length_mm=parameters["length_mm"],
             dry_run=dry_run,
         )
 

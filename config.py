@@ -3,7 +3,14 @@
 from __future__ import annotations
 
 import re
+import os
 from pathlib import Path
+
+try:
+    from dotenv import load_dotenv
+except ModuleNotFoundError:  # pragma: no cover - requirements install provides it
+    def load_dotenv(*_args: object, **_kwargs: object) -> bool:
+        return False
 
 from utils.output_paths import (
     get_assemblies_output_dir,
@@ -14,6 +21,8 @@ from utils.output_paths import (
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+load_dotenv(PROJECT_ROOT / ".env")
+
 OUTPUTS_DIR = get_user_output_root()
 PARTS_DIR = get_parts_output_dir()
 EXPORTS_DIR = get_exports_output_dir()
@@ -27,6 +36,11 @@ DEFAULT_TEMPLATE_PATH = None
 DEFAULT_SOLIDWORKS_YEAR = 2022
 USER_UNIT = "mm"
 SOLIDWORKS_UNIT = "m"
+
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+OLLAMA_EXECUTABLE = os.getenv("OLLAMA_EXECUTABLE", "")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
+OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "60"))
 
 MAX_DIMENSION_MM = 10000
 MIN_DIMENSION_MM = 0.1

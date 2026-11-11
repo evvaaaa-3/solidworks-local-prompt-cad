@@ -1,14 +1,12 @@
-"""Placeholder for the future Ollama-backed parser.
-
-Stage 1 must not call Ollama. This module exists only to reserve the future
-integration point.
-
-Later stages will run Ollama locally. Ollama will only return structured JSON
-intent and will never generate or execute SolidWorks code.
-"""
+"""Compatibility wrapper for the Ollama-backed parser."""
 
 from __future__ import annotations
 
+from llm.intent_parser import parse_prompt_ollama
+
 
 def parse_with_ollama(prompt: str) -> dict:
-    raise NotImplementedError("Ollama parser will be implemented in a later stage.")
+    result = parse_prompt_ollama(prompt)
+    if not result.success or result.intent is None:
+        raise ValueError(result.message or result.code or "Ollama parsing failed.")
+    return result.intent

@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from nlp.preprocessor import normalize_prompt
+
 
 _NUMBER_PATTERN = re.compile(r"-?\d+(?:\.\d+)?")
 _FILENAME_PATTERN = re.compile(r"\b([A-Za-z0-9_.-]+\.(?:step|stp))\b", re.IGNORECASE)
@@ -113,14 +115,14 @@ def _parse_assembly_prompt(normalized: str) -> dict[str, Any] | None:
     return None
 
 
-def parse_prompt_rule_based(prompt: str) -> dict[str, Any]:
+def parse_prompt_rule_based(prompt: str, *, preprocessed: bool = False) -> dict[str, Any]:
     """Parse supported CAD prompts into a structured intent dictionary.
 
     Stage 1 intentionally uses fixed parsing rules only. LLM/Ollama parsing is
     reserved for a later stage.
     """
 
-    normalized = prompt.strip().lower()
+    normalized = prompt.strip().lower() if preprocessed else normalize_prompt(prompt)
     if not normalized:
         raise ValueError("Prompt cannot be empty.")
 
@@ -208,6 +210,28 @@ def parse_prompt_rule_based(prompt: str) -> dict[str, Any]:
                 "outer_diameter_mm": outer_diameter,
                 "inner_diameter_mm": inner_diameter,
                 "height_mm": height,
+            },
+        }
+
+    if "shaft" in normalized and "flange" not in normalized and "wheel" not in normalized:
+        diameter = _dimension_after("diameter", normalized)
+        length = _dimension_after("length", normalized)
+        if length is None:
+            length = _dimension_after("long", normalized)
+        if diameter is None:
+            diameter = _dimension_after("diameter", normalized.replace("in diameter", "diameter"))
+        values = _numbers(normalized)
+        if diameter is None and "diameter" in normalized and values:
+            diameter = values[-1] if "long" in normalized and len(values) >= 2 else values[0]
+        if length is None and ("long" in normalized or "length" in normalized) and values:
+            length = values[0]
+        if diameter is None or length is None:
+            raise ValueError("Shaft prompts need diameter and length dimensions.")
+        return {
+            "tool_name": "create_shaft",
+            "parameters": {
+                "diameter_mm": diameter,
+                "length_mm": length,
             },
         }
 

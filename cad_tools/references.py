@@ -65,12 +65,13 @@ def resolve_component_reference(
     selector: ReferenceSpec,
     component: Any,
     resolver: Any,
+    append: bool = True,
 ) -> ResolvedReference:
     """Resolve a structured selector using a COM-specific resolver object."""
 
     validate_reference_selector(selector)
     try:
-        sw_entity = resolver.resolve(component, selector)
+        sw_entity = resolver.resolve(component, selector, append=append)
     except Exception as exc:
         raise ValueError(f"Could not resolve {selector.entity_type} on {component_id}: {exc}") from exc
     if sw_entity is None:

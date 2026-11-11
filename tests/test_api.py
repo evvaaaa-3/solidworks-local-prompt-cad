@@ -50,6 +50,37 @@ class ApiTests(unittest.TestCase):
             response.json()["validated_intent"]["tool_name"],
             "create_sphere",
         )
+        self.assertEqual(response.json()["parser_used"], "rule")
+        self.assertEqual(response.json()["validation_status"], "valid")
+
+    def test_parse_accepts_auto_mode(self) -> None:
+        response = self.client.post(
+            "/api/parse",
+            json={"prompt": "create a 50 mm cube", "parser_mode": "auto"},
+        )
+
+        self.assertTrue(response.json()["success"])
+        self.assertEqual(response.json()["parser_used"], "rule")
+
+    def test_parse_ambiguous_shaft_returns_clarification_metadata(self) -> None:
+        response = self.client.post(
+            "/api/parse",
+            json={"prompt": "create a shaft"},
+        )
+
+        body = response.json()
+        self.assertFalse(body["success"])
+        self.assertTrue(body["clarification_required"])
+        self.assertEqual(body["validation_status"], "missing_dimension")
+
+    def test_ollama_status_endpoint_does_not_connect_to_solidworks(self) -> None:
+        with patch("llm.ollama_client.requests.get", side_effect=Exception("down")), \
+             patch("cad_tools.primitives.connect_solidworks") as connect:
+            response = self.client.get("/api/ollama/status")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["available"])
+        connect.assert_not_called()
 
     def test_negative_dimension_returns_friendly_error(self) -> None:
         response = self.client.post(
